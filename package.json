@@ -25,7 +25,7 @@
       "minGatewayVersion": "2026.5.10-beta.1"
     },
     "release": {
-      "publishToNpm": true
+      "publishToNpm": false
     }
   }
 }

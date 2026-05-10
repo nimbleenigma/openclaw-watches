@@ -140,7 +140,7 @@ limits are known rough edges.
   monitoring system.
 - ClawHub/npm publishing would need a final package/release pass.
 
-## Secret And Portability Checklist
+## Secret and Portability Checklist
 
 Before sharing:
 
