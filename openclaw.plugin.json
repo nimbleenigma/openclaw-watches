@@ -3,7 +3,7 @@
   "enabledByDefault": true,
   "name": "Watches",
   "description": "Temporary model, URL, and GitHub PR watches that notify the originating chat when they trigger.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "activation": {
     "onStartup": true
   },
@@ -38,6 +38,10 @@
         "type": "number",
         "minimum": 1,
         "maximum": 168
+      },
+      "githubTokenEnv": {
+        "type": "string",
+        "minLength": 1
       }
     }
   }

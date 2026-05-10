@@ -57,7 +57,7 @@ function requestUrl(input: RequestInfo | URL): string {
 }
 
 function createPassingGitHubFetch() {
-  return vi.fn(async (input: RequestInfo | URL) => {
+  return vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     const url = requestUrl(input);
     if (url.endsWith("/pulls/123")) {
       return new Response(
@@ -93,6 +93,14 @@ function createPassingGitHubFetch() {
     }
     throw new Error(`Unexpected GitHub API URL: ${url}`);
   });
+}
+
+function requestAuthHeader(call: unknown[]): string | undefined {
+  const init = call[1] as RequestInit | undefined;
+  const headers = init?.headers;
+  return headers && !Array.isArray(headers) && !(headers instanceof Headers)
+    ? (headers as Record<string, string>).authorization
+    : undefined;
 }
 
 describe("WatchesScheduler", () => {
@@ -212,13 +220,16 @@ describe("WatchesScheduler", () => {
       const runtime = createRuntime();
       const fetchImpl = createPassingGitHubFetch();
       const originalFetch = globalThis.fetch;
+      const tokenEnv = "OPENCLAW_WATCHES_TEST_GITHUB_TOKEN";
+      const originalToken = process.env[tokenEnv];
+      process.env[tokenEnv] = "test-token-123";
       vi.stubGlobal("fetch", fetchImpl);
       try {
         const scheduler = new WatchesScheduler({
           store,
           runtime: runtime as never,
           cfg: {},
-          config: DEFAULT_WATCHES_CONFIG,
+          config: { ...DEFAULT_WATCHES_CONFIG, githubTokenEnv: tokenEnv },
           claimedBy: "test-worker",
           now: () => 1_000,
         });
@@ -232,8 +243,18 @@ describe("WatchesScheduler", () => {
             idempotencyKey: expect.stringMatching(/^watch:w_pr:trigger:/),
           }),
         );
+        expect(fetchImpl.mock.calls.map(requestAuthHeader)).toEqual([
+          "Bearer test-token-123",
+          "Bearer test-token-123",
+          "Bearer test-token-123",
+        ]);
       } finally {
         vi.stubGlobal("fetch", originalFetch);
+        if (originalToken === undefined) {
+          delete process.env[tokenEnv];
+        } else {
+          process.env[tokenEnv] = originalToken;
+        }
       }
     });
   });

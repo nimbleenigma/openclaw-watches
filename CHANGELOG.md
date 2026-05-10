@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here.
 
+## 0.1.1 - 2026-05-10
+
+### Added
+
+- Optional GitHub token authentication for PR watches through the configured
+  `githubTokenEnv` environment variable.
+
+### Changed
+
+- GitHub PR watch docs now cover public unauthenticated mode and private or
+  higher-rate-limit token mode.
+
 ## 0.1.0 - 2026-05-10
 
 Initial public-ready beta.
@@ -27,6 +39,7 @@ Initial public-ready beta.
 
 ### Known Limitations
 
-- GitHub API calls are unauthenticated.
+- GitHub private repository support requires a token exposed through the
+  configured `githubTokenEnv` variable.
 - URL watches fetch text only and do not render JavaScript.
 - Watches are intentionally short-lived and are not a durable monitoring system.

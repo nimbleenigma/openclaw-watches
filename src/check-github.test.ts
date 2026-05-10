@@ -42,7 +42,7 @@ function createGitHubFetch(
   } = {},
 ) {
   const sha = params.sha ?? "abc1234567890";
-  return vi.fn(async (input: RequestInfo | URL) => {
+  return vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     const url = requestUrl(input);
     if (url.endsWith("/pulls/123")) {
       return jsonResponse({
@@ -75,6 +75,14 @@ function createGitHubFetch(
     }
     throw new Error(`Unexpected GitHub API URL: ${url}`);
   });
+}
+
+function authHeader(call: unknown[]): string | undefined {
+  const init = call[1] as RequestInit | undefined;
+  const headers = init?.headers;
+  return headers && !Array.isArray(headers) && !(headers instanceof Headers)
+    ? (headers as Record<string, string>).authorization
+    : undefined;
 }
 
 function createGitHubWatch(overrides: Partial<WatchRecord> = {}): WatchRecord {
@@ -294,5 +302,26 @@ describe("GitHub PR checks", () => {
         fetchImpl,
       }),
     ).rejects.toThrow("GitHub API rate limit exceeded");
+  });
+
+  it("uses optional bearer tokens only in GitHub API request headers", async () => {
+    const fetchImpl = createGitHubFetch();
+    const token = "test-token-123";
+
+    const snapshot = await fetchGitHubPrSnapshot({
+      source,
+      timeoutMs: 1000,
+      fetchImpl,
+      token,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(fetchImpl.mock.calls.map(authHeader)).toEqual([
+      `Bearer ${token}`,
+      `Bearer ${token}`,
+      `Bearer ${token}`,
+    ]);
+    expect(snapshot.summary).not.toContain(token);
+    expect(snapshot.resultHash).not.toContain(token);
   });
 });

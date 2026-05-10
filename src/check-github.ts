@@ -142,10 +142,18 @@ function formatGitHubHttpError(response: Response, url: string): string {
   return `GitHub API HTTP ${response.status} fetching ${url}`;
 }
 
+function githubHeaders(token?: string): Record<string, string> {
+  const trimmedToken = token?.trim();
+  return trimmedToken
+    ? { ...GITHUB_HEADERS, authorization: `Bearer ${trimmedToken}` }
+    : GITHUB_HEADERS;
+}
+
 async function fetchGitHubJson(params: {
   url: string;
   timeoutMs: number;
   fetchImpl?: FetchImpl;
+  token?: string;
 }): Promise<unknown> {
   const fetchFn = params.fetchImpl ?? fetch;
   const controller = new AbortController();
@@ -154,7 +162,7 @@ async function fetchGitHubJson(params: {
   let response: Response;
   try {
     response = await fetchFn(params.url, {
-      headers: GITHUB_HEADERS,
+      headers: githubHeaders(params.token),
       signal: controller.signal,
     });
   } catch (error) {
@@ -508,12 +516,14 @@ export async function fetchGitHubPrSnapshot(params: {
   timeoutMs: number;
   fetchImpl?: FetchImpl;
   includeReviews?: boolean;
+  token?: string;
 }): Promise<GitHubPrSnapshot> {
   const pr = parsePullResponse(
     await fetchGitHubJson({
       url: githubApiUrl(params.source, `/pulls/${params.source.number}`),
       timeoutMs: params.timeoutMs,
       fetchImpl: params.fetchImpl,
+      token: params.token,
     }),
     params.source,
   );
@@ -522,6 +532,7 @@ export async function fetchGitHubPrSnapshot(params: {
       url: githubApiUrl(params.source, `/commits/${pr.headSha}/status`),
       timeoutMs: params.timeoutMs,
       fetchImpl: params.fetchImpl,
+      token: params.token,
     }),
   );
   const checkRuns = parseCheckRuns(
@@ -529,6 +540,7 @@ export async function fetchGitHubPrSnapshot(params: {
       url: githubApiUrl(params.source, `/commits/${pr.headSha}/check-runs?per_page=100`),
       timeoutMs: params.timeoutMs,
       fetchImpl: params.fetchImpl,
+      token: params.token,
     }),
   );
   const reviews = params.includeReviews
@@ -538,6 +550,7 @@ export async function fetchGitHubPrSnapshot(params: {
             url: githubApiUrl(params.source, `/pulls/${params.source.number}/reviews?per_page=100`),
             timeoutMs: params.timeoutMs,
             fetchImpl: params.fetchImpl,
+            token: params.token,
           }),
         ),
       )
@@ -565,6 +578,7 @@ export async function checkGitHubPrWatch(params: {
   watch: WatchRecord;
   timeoutMs: number;
   fetchImpl?: FetchImpl;
+  token?: string;
 }): Promise<CheckOutcome> {
   if (params.watch.kind !== "github_pr") {
     throw new Error(`Expected GitHub PR watch, got ${params.watch.kind}`);
@@ -579,6 +593,7 @@ export async function checkGitHubPrWatch(params: {
     timeoutMs: params.timeoutMs,
     fetchImpl: params.fetchImpl,
     includeReviews,
+    token: params.token,
   });
 
   if (params.watch.condition.type === "github_pr_checks_pass") {

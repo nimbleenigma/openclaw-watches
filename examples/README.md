@@ -85,6 +85,8 @@ Cancel a watch:
 
 ## Notes
 
-- GitHub PR watches currently use the unauthenticated public GitHub API.
+- GitHub PR watches work unauthenticated for public repositories. Set the
+  configured `githubTokenEnv` variable for private repositories or higher rate
+  limits.
 - URL watches fetch text only; they do not run browser-rendered JavaScript.
 - Watches stop when they trigger or expire.

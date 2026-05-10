@@ -93,7 +93,8 @@ All config is optional. Defaults are intentionally conservative.
         "config": {
           "maxActivePerOwner": 20,
           "defaultIntervalSeconds": 900,
-          "defaultExpiryHours": 24
+          "defaultExpiryHours": 24,
+          "githubTokenEnv": "GITHUB_TOKEN"
         }
       }
     }
@@ -108,6 +109,8 @@ Config fields:
   suffix. Default `900` seconds.
 - `defaultExpiryHours`: expiry for watches without a `for` suffix. Default
   `24` hours.
+- `githubTokenEnv`: environment variable name to read for GitHub API auth.
+  Default `GITHUB_TOKEN`; no token is stored in watch state or notifications.
 
 Per-watch schedule suffixes are bounded to 60 seconds through 24 hours for the
 interval, and 1 hour through 7 days for expiry.
@@ -118,8 +121,9 @@ interval, and 1 hour through 7 days for expiry.
   `watches/watches.sqlite`.
 - URL watches use bounded safe HTTP/HTTPS fetches with SSRF guardrails. They do
   not render JavaScript.
-- GitHub PR watches use the public GitHub API. Private repositories or rate
-  limits may require future auth support.
+- GitHub PR watches use the GitHub API. Public repositories work without auth.
+  For private repositories or higher rate limits, set the configured
+  `githubTokenEnv` variable in the OpenClaw gateway environment.
 - Notifications go back to the originating OpenClaw chat/session target.
 - The plugin requires an OpenClaw runtime with plugin services, runtime slash
   commands, `watches_manage` agent tools, `notifyCapturedTarget`, and
@@ -129,12 +133,11 @@ interval, and 1 hour through 7 days for expiry.
 
 When reporting bugs, include your OpenClaw version, install method, watch command,
 expected result, actual result, and redacted logs. GitHub PR watches currently
-use the unauthenticated public GitHub API, so private repositories and rate
-limits are known rough edges.
+support optional GitHub token auth through an environment variable; redact token
+names and values from reports unless they are generic names like `GITHUB_TOKEN`.
 
 ## Current Rough Edges
 
-- GitHub API calls are unauthenticated.
 - URL watches are text-only and do not run browser-rendered pages.
 - Watches are intentionally ephemeral; this is not a replacement for a durable
   monitoring system.

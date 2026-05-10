@@ -44,6 +44,11 @@ function notificationTargetFromWatch(watch: WatchRecord) {
   };
 }
 
+function readGithubToken(config: WatchesConfig): string | undefined {
+  const tokenEnv = config.githubTokenEnv.trim();
+  return tokenEnv ? process.env[tokenEnv]?.trim() || undefined : undefined;
+}
+
 async function defaultEvaluator(
   watch: WatchRecord,
   context: { cfg: OpenClawConfig },
@@ -63,6 +68,7 @@ async function defaultEvaluator(
     return await checkGitHubPrWatch({
       watch,
       timeoutMs: config.urlTimeoutMs,
+      token: readGithubToken(config),
     });
   }
   throw new Error(`Unsupported watch kind: ${(watch as { kind?: string }).kind ?? "unknown"}`);

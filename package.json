@@ -1,6 +1,6 @@
 {
   "name": "openclaw-watches",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Ephemeral model, URL, and GitHub PR watches for OpenClaw.",
   "license": "MIT",
   "files": [

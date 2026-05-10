@@ -972,6 +972,7 @@ const DEFAULT_WATCHES_CONFIG = {
 	retentionMs: 10080 * 60 * 1e3,
 	urlTimeoutMs: 1e4,
 	urlMaxBytes: 512 * 1024,
+	githubTokenEnv: "GITHUB_TOKEN",
 	maxConsecutiveErrors: 5
 };
 function finiteNumber(value) {
@@ -979,6 +980,11 @@ function finiteNumber(value) {
 }
 function clamp(value, min, max) {
 	return Math.min(max, Math.max(min, value));
+}
+function nonEmptyString(value) {
+	if (typeof value !== "string") return;
+	const trimmed = value.trim();
+	return trimmed.length > 0 ? trimmed : void 0;
 }
 function resolveWatchesConfig(input) {
 	const defaultIntervalSeconds = finiteNumber(input?.defaultIntervalSeconds) ?? DEFAULT_WATCHES_CONFIG.defaultIntervalSeconds;
@@ -988,6 +994,7 @@ function resolveWatchesConfig(input) {
 		...DEFAULT_WATCHES_CONFIG,
 		defaultIntervalSeconds: Math.floor(clamp(defaultIntervalSeconds, 60, 1440 * 60)),
 		defaultExpiryMs: Math.floor(clamp(defaultExpiryHours, 1, 168) * 60 * 60 * 1e3),
+		githubTokenEnv: nonEmptyString(input?.githubTokenEnv) ?? DEFAULT_WATCHES_CONFIG.githubTokenEnv,
 		maxActivePerOwner: Math.floor(clamp(maxActivePerOwner, 1, 100))
 	};
 }
@@ -1101,6 +1108,13 @@ function formatGitHubHttpError(response, url) {
 	}
 	return `GitHub API HTTP ${response.status} fetching ${url}`;
 }
+function githubHeaders(token) {
+	const trimmedToken = token?.trim();
+	return trimmedToken ? {
+		...GITHUB_HEADERS,
+		authorization: `Bearer ${trimmedToken}`
+	} : GITHUB_HEADERS;
+}
 async function fetchGitHubJson(params) {
 	const fetchFn = params.fetchImpl ?? fetch;
 	const controller = new AbortController();
@@ -1109,7 +1123,7 @@ async function fetchGitHubJson(params) {
 	let response;
 	try {
 		response = await fetchFn(params.url, {
-			headers: GITHUB_HEADERS,
+			headers: githubHeaders(params.token),
 			signal: controller.signal
 		});
 	} catch (error) {
@@ -1340,22 +1354,26 @@ async function fetchGitHubPrSnapshot(params) {
 	const pr = parsePullResponse(await fetchGitHubJson({
 		url: githubApiUrl(params.source, `/pulls/${params.source.number}`),
 		timeoutMs: params.timeoutMs,
-		fetchImpl: params.fetchImpl
+		fetchImpl: params.fetchImpl,
+		token: params.token
 	}), params.source);
 	const combinedStatus = parseCombinedStatus(await fetchGitHubJson({
 		url: githubApiUrl(params.source, `/commits/${pr.headSha}/status`),
 		timeoutMs: params.timeoutMs,
-		fetchImpl: params.fetchImpl
+		fetchImpl: params.fetchImpl,
+		token: params.token
 	}));
 	const checkRuns = parseCheckRuns(await fetchGitHubJson({
 		url: githubApiUrl(params.source, `/commits/${pr.headSha}/check-runs?per_page=100`),
 		timeoutMs: params.timeoutMs,
-		fetchImpl: params.fetchImpl
+		fetchImpl: params.fetchImpl,
+		token: params.token
 	}));
 	const reviews = params.includeReviews ? rollupReviews(parseReviews(await fetchGitHubJson({
 		url: githubApiUrl(params.source, `/pulls/${params.source.number}/reviews?per_page=100`),
 		timeoutMs: params.timeoutMs,
-		fetchImpl: params.fetchImpl
+		fetchImpl: params.fetchImpl,
+		token: params.token
 	}))) : rollupReviews([]);
 	const checks = rollupChecks(combinedStatus, checkRuns);
 	const summary = formatSnapshotSummary({
@@ -1392,7 +1410,8 @@ async function checkGitHubPrWatch(params) {
 		source,
 		timeoutMs: params.timeoutMs,
 		fetchImpl: params.fetchImpl,
-		includeReviews
+		includeReviews,
+		token: params.token
 	});
 	if (params.watch.condition.type === "github_pr_checks_pass") {
 		if (snapshot.checks.state !== "passing") return {
@@ -1856,6 +1875,10 @@ function notificationTargetFromWatch(watch) {
 		threadId: watch.ownerThreadId
 	};
 }
+function readGithubToken(config) {
+	const tokenEnv = config.githubTokenEnv.trim();
+	return tokenEnv ? process.env[tokenEnv]?.trim() || void 0 : void 0;
+}
 async function defaultEvaluator(watch, context, config) {
 	if (watch.kind === "model") return await checkModelAvailability({
 		watch,
@@ -1868,7 +1891,8 @@ async function defaultEvaluator(watch, context, config) {
 	});
 	if (watch.kind === "github_pr") return await checkGitHubPrWatch({
 		watch,
-		timeoutMs: config.urlTimeoutMs
+		timeoutMs: config.urlTimeoutMs,
+		token: readGithubToken(config)
 	});
 	throw new Error(`Unsupported watch kind: ${watch.kind ?? "unknown"}`);
 }

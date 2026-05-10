@@ -7,6 +7,7 @@ export type WatchesConfig = {
   retentionMs: number;
   urlTimeoutMs: number;
   urlMaxBytes: number;
+  githubTokenEnv: string;
   maxConsecutiveErrors: number;
 };
 
@@ -19,6 +20,7 @@ export const DEFAULT_WATCHES_CONFIG: WatchesConfig = {
   retentionMs: 7 * 24 * 60 * 60 * 1000,
   urlTimeoutMs: 10_000,
   urlMaxBytes: 512 * 1024,
+  githubTokenEnv: "GITHUB_TOKEN",
   maxConsecutiveErrors: 5,
 };
 
@@ -28,6 +30,14 @@ function finiteNumber(value: unknown): number | undefined {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 export function resolveWatchesConfig(input?: Record<string, unknown>): WatchesConfig {
@@ -43,6 +53,7 @@ export function resolveWatchesConfig(input?: Record<string, unknown>): WatchesCo
     ...DEFAULT_WATCHES_CONFIG,
     defaultIntervalSeconds: Math.floor(clamp(defaultIntervalSeconds, 60, 24 * 60 * 60)),
     defaultExpiryMs: Math.floor(clamp(defaultExpiryHours, 1, 24 * 7) * 60 * 60 * 1000),
+    githubTokenEnv: nonEmptyString(input?.githubTokenEnv) ?? DEFAULT_WATCHES_CONFIG.githubTokenEnv,
     maxActivePerOwner: Math.floor(clamp(maxActivePerOwner, 1, 100)),
   };
 }
