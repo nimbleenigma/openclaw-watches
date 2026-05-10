@@ -140,14 +140,12 @@ limits are known rough edges.
   monitoring system.
 - ClawHub/npm publishing would need a final package/release pass.
 
-## Secret and Portability Checklist
+## Development and Packaging Notes
 
-Before sharing:
-
-- No committed `.env`, logs, SQLite state files, tokens, or local runtime
-  config.
-- No hardcoded user paths, chat IDs, device paths, or private hostnames.
-- `openclaw.plugin.json` stays present at the repo root.
-- `package.json` keeps the `openclaw.extensions` entry pointing at `./index.ts`.
-- `dist/index.js` exists before installing from Git or publishing.
-- A clean OpenClaw install can run `openclaw plugins install <path-or-git-url>`.
+- `openclaw.plugin.json` is the plugin manifest OpenClaw uses for discovery.
+- `package.json` keeps `openclaw.extensions` pointed at `./index.ts` for source
+  checkout development.
+- `dist/index.js` and `dist/api.js` are committed so Git/package installs can
+  load the plugin without a local TypeScript build step.
+- Before release-style sharing, run a clean install smoke test with
+  `openclaw plugins install <path-or-git-url>`.
