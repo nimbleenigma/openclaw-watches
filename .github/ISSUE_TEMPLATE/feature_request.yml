@@ -1,0 +1,44 @@
+name: Feature request
+description: Suggest an improvement or new watch type.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or workflow
+      description: What are you trying to watch or automate?
+      placeholder: "I want OpenClaw to tell me when..."
+    validations:
+      required: true
+  - type: textarea
+    id: proposed
+    attributes:
+      label: Proposed behavior
+      description: What command or tool behavior would feel right?
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Model watches
+        - URL watches
+        - GitHub PR watches
+        - Notifications
+        - Scheduling/expiry
+        - Agent tool
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
+      description: Links, examples, or constraints. Please avoid secrets/private data.
+    validations:
+      required: false

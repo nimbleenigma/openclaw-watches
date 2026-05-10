@@ -1,0 +1,81 @@
+name: Bug report
+description: Report something that is broken or surprising.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting this. Please redact secrets, tokens, private URLs, and private repository names before posting logs.
+  - type: input
+    id: openclaw-version
+    attributes:
+      label: OpenClaw version
+      description: Run `openclaw --version`.
+      placeholder: "2026.5.10-beta.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Install method
+      options:
+        - Git URL
+        - Local path
+        - Source checkout under extensions/watches
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: watch-type
+    attributes:
+      label: Watch type
+      options:
+        - Model availability
+        - URL contains
+        - URL changed
+        - URL regex
+        - GitHub PR checks
+        - GitHub PR review/merge state
+        - Management command/tool
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Watch command or tool input
+      description: Include the exact command or tool parameters, with secrets/private URLs redacted.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste only the smallest useful log excerpt. Redact secrets first.
+      render: text
+    validations:
+      required: false
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I removed secrets, tokens, and private data from this report.
+          required: true
+        - label: I included the OpenClaw version and the watch command/input.
+          required: true

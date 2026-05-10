@@ -1,0 +1,44 @@
+{
+  "id": "watches",
+  "enabledByDefault": true,
+  "name": "Watches",
+  "description": "Temporary model, URL, and GitHub PR watches that notify the originating chat when they trigger.",
+  "version": "0.1.0",
+  "activation": {
+    "onStartup": true
+  },
+  "commandAliases": [
+    {
+      "name": "watch",
+      "kind": "runtime-slash"
+    },
+    {
+      "name": "watches",
+      "kind": "runtime-slash"
+    }
+  ],
+  "contracts": {
+    "tools": ["watches_manage"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "maxActivePerOwner": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 100
+      },
+      "defaultIntervalSeconds": {
+        "type": "number",
+        "minimum": 60,
+        "maximum": 86400
+      },
+      "defaultExpiryHours": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 168
+      }
+    }
+  }
+}

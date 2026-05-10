@@ -1,0 +1,31 @@
+{
+  "name": "openclaw-watches",
+  "version": "0.1.0",
+  "description": "Ephemeral model, URL, and GitHub PR watches for OpenClaw.",
+  "license": "MIT",
+  "files": [
+    "dist/**",
+    "api.ts",
+    "index.ts",
+    "openclaw.plugin.json",
+    "src",
+    "examples",
+    ".github/ISSUE_TEMPLATE",
+    "CHANGELOG.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.5.10-beta.1",
+      "minGatewayVersion": "2026.5.10-beta.1"
+    },
+    "release": {
+      "publishToNpm": true
+    }
+  }
+}
