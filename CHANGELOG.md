@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 
+## 0.1.2 - 2026-05-10
+
+### Changed
+
+- URL page-text changed watches now strip more obvious page chrome and narrow
+  volatile timestamp/hash lines before hashing, making
+  `/watch url <url> text changed` quieter for ordinary HTML pages.
+
 ## 0.1.1 - 2026-05-10
 
 ### Added

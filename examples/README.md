@@ -24,6 +24,12 @@ Tell me when a page changes:
 /watch url https://example.com/releases changed every 10m for 6h
 ```
 
+Tell me when the readable text of a page changes:
+
+```text
+/watch url https://example.com/releases text changed every 10m for 6h
+```
+
 Tell me when a page contains text:
 
 ```text

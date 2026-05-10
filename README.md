@@ -12,6 +12,7 @@ monitoring.
 - Model availability: `/watch models openai/gpt-5.5 until available`
 - URL text: `/watch url https://example.com contains "ready"`
 - URL changes: `/watch url https://example.com/releases changed`
+- URL page-text changes: `/watch url https://example.com/releases text changed`
 - URL regex: `/watch url https://example.com text matches "v\\d+\\.\\d+"`
 - GitHub PR checks passed or failed
 - GitHub PR merged
@@ -121,6 +122,10 @@ interval, and 1 hour through 7 days for expiry.
   `watches/watches.sqlite`.
 - URL watches use bounded safe HTTP/HTTPS fetches with SSRF guardrails. They do
   not render JavaScript.
+- URL `text changed` watches strip obvious HTML chrome such as scripts, styles,
+  headers, footers, navigation, and narrow volatile timestamp/hash lines before
+  hashing, which makes them quieter than raw `changed` watches for ordinary HTML
+  pages.
 - GitHub PR watches use the GitHub API. Public repositories work without auth.
   For private repositories or higher rate limits, set the configured
   `githubTokenEnv` variable in the OpenClaw gateway environment.

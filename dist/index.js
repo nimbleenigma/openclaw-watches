@@ -888,9 +888,10 @@ function usage() {
 		"/watch models <model> until available",
 		"/watch url <url> contains \"<text>\"",
 		"/watch url <url> changed",
+		"/watch url <url> text changed",
 		"/watch url <url> matches \"<regex>\"",
 		"Optional schedule suffix: every 5m for 6h",
-		"Add text for page-text mode, e.g. /watch url <url> text contains \"<text>\"",
+		"Add text for quieter page-text mode, e.g. /watch url <url> text contains \"<text>\"",
 		"/watch github pr <url|owner/repo#number> until checks pass",
 		"/watch github pr <url|owner/repo#number> until checks fail",
 		"/watch github pr <url|owner/repo#number> until merged",
@@ -1642,14 +1643,20 @@ function decodeHtmlEntities(text) {
 	});
 }
 function normalizeVisibleText(text) {
-	return decodeHtmlEntities(text).replace(/\s+/g, " ").trim();
+	return normalizeStableVisibleText(decodeHtmlEntities(text));
+}
+function isLikelyVolatileLine(line) {
+	return /^(?:last\s+)?(?:generated|built|updated|modified|refreshed)\s+(?:at|on)?:?\s+\d/i.test(line) || /^(?:build|asset|chunk|commit|revision|etag|nonce|trace|request)\s*(?:id|hash)?:?\s+[a-z0-9._:-]{8,}$/i.test(line) || /^\d{4}-\d{2}-\d{2}[t\s]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:z|[+-]\d{2}:?\d{2})?$/i.test(line) || /^[a-f0-9]{32,64}$/i.test(line);
+}
+function normalizeStableVisibleText(text) {
+	return text.split(/\r?\n/).map((line) => line.replace(/\s+/g, " ").trim()).filter((line) => line && !isLikelyVolatileLine(line)).join("\n").replace(/\s+/g, " ").trim();
 }
 function isHtmlContentType(contentType) {
 	const lower = contentType?.toLowerCase() ?? "";
 	return lower.startsWith("text/html") || lower.startsWith("application/xhtml+xml") || lower.includes("+html");
 }
 function stripHtmlToVisibleText(html) {
-	let scoped = html.replace(/<script\b[\s\S]*?<\/script>/gi, " ").replace(/<style\b[\s\S]*?<\/style>/gi, " ").replace(/<noscript\b[\s\S]*?<\/noscript>/gi, " ").replace(/<template\b[\s\S]*?<\/template>/gi, " ");
+	let scoped = html.replace(/<!--[\s\S]*?-->/g, " ").replace(/<script\b[\s\S]*?<\/script>/gi, " ").replace(/<style\b[\s\S]*?<\/style>/gi, " ").replace(/<noscript\b[\s\S]*?<\/noscript>/gi, " ").replace(/<template\b[\s\S]*?<\/template>/gi, " ").replace(/<(nav|header|footer|aside|form|dialog|svg|canvas)\b[\s\S]*?<\/\1>/gi, " ");
 	const articleOrMain = [...scoped.matchAll(/<(article|main)\b[^>]*>([\s\S]*?)<\/\1>/gi)].map((match) => match[2] ?? "").toSorted((a, b) => b.length - a.length)[0];
 	if (articleOrMain) scoped = articleOrMain;
 	else {

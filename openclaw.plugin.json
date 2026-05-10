@@ -3,7 +3,7 @@
   "enabledByDefault": true,
   "name": "Watches",
   "description": "Temporary model, URL, and GitHub PR watches that notify the originating chat when they trigger.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "activation": {
     "onStartup": true
   },

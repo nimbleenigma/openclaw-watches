@@ -192,6 +192,87 @@ describe("URL checks", () => {
     expect(outcome.summary).toContain("page text");
   });
 
+  it("keeps text changed watches quiet for HTML chrome and volatile line changes", async () => {
+    const baseline = await checkUrlWatch({
+      watch: createUrlWatch({
+        source: { url: "https://example.com/releases", contentMode: "text" },
+        condition: { type: "changed" },
+        title: "URL text changed: https://example.com/releases",
+      }),
+      timeoutMs: 1000,
+      maxBytes: 4096,
+      fetchImpl: vi.fn(
+        async () =>
+          new Response(
+            [
+              "<html><body>",
+              "<header>Docs Blog Login</header>",
+              "<h1>Release Notes</h1>",
+              "<p>Version 1.0 is ready.</p>",
+              "<footer>Generated at 2026-05-10T18:00:00Z</footer>",
+              "</body></html>",
+            ].join(""),
+            { headers: { "content-type": "text/html; charset=utf-8" } },
+          ),
+      ),
+    });
+    expect(baseline.triggered).toBe(false);
+    expect(baseline.summary).toContain("Baseline captured");
+
+    const chromeOnlyChange = await checkUrlWatch({
+      watch: createUrlWatch({
+        source: { url: "https://example.com/releases", contentMode: "text" },
+        condition: { type: "changed" },
+        title: "URL text changed: https://example.com/releases",
+        lastResultHash: baseline.resultHash,
+      }),
+      timeoutMs: 1000,
+      maxBytes: 4096,
+      fetchImpl: vi.fn(
+        async () =>
+          new Response(
+            [
+              "<html><body>",
+              "<header>Docs Blog Login Status</header>",
+              "<h1>Release Notes</h1>",
+              "<p>Version 1.0 is ready.</p>",
+              "<footer>Generated at 2026-05-10T18:12:45Z</footer>",
+              "</body></html>",
+            ].join(""),
+            { headers: { "content-type": "text/html; charset=utf-8" } },
+          ),
+      ),
+    });
+    expect(chromeOnlyChange.triggered).toBe(false);
+    expect(chromeOnlyChange.summary).toContain("No content change");
+
+    const meaningfulChange = await checkUrlWatch({
+      watch: createUrlWatch({
+        source: { url: "https://example.com/releases", contentMode: "text" },
+        condition: { type: "changed" },
+        title: "URL text changed: https://example.com/releases",
+        lastResultHash: baseline.resultHash,
+      }),
+      timeoutMs: 1000,
+      maxBytes: 4096,
+      fetchImpl: vi.fn(
+        async () =>
+          new Response(
+            [
+              "<html><body>",
+              "<header>Docs Blog Login Status</header>",
+              "<h1>Release Notes</h1>",
+              "<p>Version 1.1 is ready.</p>",
+              "<footer>Generated at 2026-05-10T18:13:45Z</footer>",
+              "</body></html>",
+            ].join(""),
+            { headers: { "content-type": "text/html; charset=utf-8" } },
+          ),
+      ),
+    });
+    expect(meaningfulChange.triggered).toBe(true);
+  });
+
   it("summarizes URL fetch timeouts without stack noise", async () => {
     const timeout = Object.assign(new Error("This operation was aborted."), {
       name: "AbortError",
