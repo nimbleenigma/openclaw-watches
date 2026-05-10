@@ -47,8 +47,8 @@ install from a local checkout or Git URL:
 
 ```bash
 openclaw plugins install ./openclaw-watches
-# or, after this is in a repo:
-openclaw plugins install git:github.com/<owner>/openclaw-watches
+# or install from GitHub:
+openclaw plugins install git:github.com/nimbleenigma/openclaw-watches
 openclaw gateway restart
 openclaw plugins inspect watches --runtime --json
 ```
@@ -138,8 +138,7 @@ limits are known rough edges.
 - URL watches are text-only and do not run browser-rendered pages.
 - Watches are intentionally ephemeral; this is not a replacement for a durable
   monitoring system.
-- The standalone repo packaging is aimed at private sharing first. Public
-  ClawHub/npm publishing would need a final package/release pass.
+- ClawHub/npm publishing would need a final package/release pass.
 
 ## Secret And Portability Checklist
 
