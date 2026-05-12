@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { WatchesConfig } from "./config.js";
 import { formatGitHubPrRef, requireGitHubPrRef } from "./github-pr.js";
+import { getWatchHealth } from "./health.js";
 import { MAX_CONDITION_TEXT_CHARS, MAX_MODEL_QUERY_CHARS, parseProviderModel } from "./parse.js";
 import { parseWatchRegex } from "./regex.js";
 import type {
@@ -16,6 +17,7 @@ import type {
 } from "./types.js";
 
 type UrlContentMode = NonNullable<UrlWatchSource["contentMode"]>;
+const OVERDUE_GRACE_MS = 60_000;
 
 export type WatchManagementStore = {
   createWatch(input: CreateWatchInput): WatchRecord;
@@ -51,6 +53,40 @@ export type WatchManagementDeps = {
   now?: () => number;
   idGenerator?: () => string;
   wakeScheduler?: () => void;
+};
+
+export type WatchDiagnostics = {
+  generatedAt: number;
+  scope: "owner" | "all";
+  total: number;
+  byStatus: Record<WatchRecord["status"], number>;
+  byKind: Record<WatchKind, number>;
+  active: {
+    total: number;
+    pendingFirstCheck: number;
+    ok: number;
+    degraded: number;
+    overdue: number;
+    due: number;
+    leased: number;
+    staleLeases: number;
+    coolingDown: number;
+    withErrors: number;
+    notificationDelivered: number;
+  };
+  nextDueAt?: number;
+  oldestOverdueAt?: number;
+  oldestStaleLeaseAt?: number;
+  recentFailures: Array<{
+    id: string;
+    title: string;
+    kind: WatchKind;
+    status: WatchRecord["status"];
+    errorCount: number;
+    lastError: string;
+    lastCheckedAt?: number;
+    nextCheckAt?: number;
+  }>;
 };
 
 export class WatchManagementError extends Error {
@@ -125,6 +161,14 @@ function validateExpiryMs(value: number): number {
     throw new WatchManagementError("Watch expiry must be between 1 hour and 7 days.");
   }
   return expiryMs;
+}
+
+function emptyStatusCounts(): Record<WatchRecord["status"], number> {
+  return { active: 0, cancelled: 0, expired: 0, failed: 0, triggered: 0 };
+}
+
+function emptyKindCounts(): Record<WatchKind, number> {
+  return { github_pr: 0, model: 0, url: 0 };
 }
 
 export class WatchManagementService {
@@ -360,6 +404,119 @@ export class WatchManagementService {
     const events = this.deps.getStore().listEvents?.(id) ?? [];
     const limit = Math.max(1, Math.min(params.limit ?? 5, 20));
     return events.slice(-limit);
+  }
+
+  getDiagnostics(context: WatchManagementContext): WatchDiagnostics {
+    const now = nowMs(this.deps);
+    const watches = this.deps.getStore().listWatches({
+      ownerKey: context.allowAnyOwner ? undefined : context.ownerKey,
+      includeAll: true,
+      limit: 500,
+    });
+    const byStatus = emptyStatusCounts();
+    const byKind = emptyKindCounts();
+    const active = {
+      total: 0,
+      pendingFirstCheck: 0,
+      ok: 0,
+      degraded: 0,
+      overdue: 0,
+      due: 0,
+      leased: 0,
+      staleLeases: 0,
+      coolingDown: 0,
+      withErrors: 0,
+      notificationDelivered: 0,
+    };
+    let nextDueAt: number | undefined;
+    let oldestOverdueAt: number | undefined;
+    let oldestStaleLeaseAt: number | undefined;
+    const recentFailures: WatchDiagnostics["recentFailures"] = [];
+
+    for (const watch of watches) {
+      byStatus[watch.status] += 1;
+      byKind[watch.kind] += 1;
+      if (watch.lastError) {
+        recentFailures.push({
+          id: watch.id,
+          title: watch.title,
+          kind: watch.kind,
+          status: watch.status,
+          errorCount: watch.errorCount,
+          lastError: watch.lastError,
+          lastCheckedAt: watch.lastCheckedAt,
+          nextCheckAt: watch.nextCheckAt,
+        });
+      }
+      if (watch.status !== "active") {
+        continue;
+      }
+      active.total += 1;
+      const health = getWatchHealth(watch, now);
+      if (health.notification === "delivered") {
+        active.notificationDelivered += 1;
+      }
+      const nextCheckAt = watch.nextCheckAt;
+      if (nextCheckAt != null && nextCheckAt < now - OVERDUE_GRACE_MS) {
+        active.overdue += 1;
+        if (oldestOverdueAt == null || nextCheckAt < oldestOverdueAt) {
+          oldestOverdueAt = nextCheckAt;
+        }
+      }
+      switch (health.state) {
+        case "pending":
+          active.pendingFirstCheck += 1;
+          break;
+        case "ok":
+          active.ok += 1;
+          break;
+        case "degraded":
+          active.degraded += 1;
+          break;
+        case "overdue":
+          break;
+        case "cancelled":
+        case "expired":
+        case "failed":
+        case "triggered":
+          break;
+      }
+      if (watch.nextCheckAt && watch.nextCheckAt <= now) {
+        active.due += 1;
+      }
+      if (watch.nextCheckAt && (nextDueAt == null || watch.nextCheckAt < nextDueAt)) {
+        nextDueAt = watch.nextCheckAt;
+      }
+      if (watch.claimedUntil && watch.claimedUntil > now) {
+        active.leased += 1;
+      }
+      if (watch.claimedUntil && watch.claimedUntil <= now) {
+        active.staleLeases += 1;
+        if (oldestStaleLeaseAt == null || watch.claimedUntil < oldestStaleLeaseAt) {
+          oldestStaleLeaseAt = watch.claimedUntil;
+        }
+      }
+      if (watch.cooldownUntil && watch.cooldownUntil > now) {
+        active.coolingDown += 1;
+      }
+      if (watch.errorCount > 0 || watch.lastError) {
+        active.withErrors += 1;
+      }
+    }
+
+    recentFailures.sort((a, b) => (b.lastCheckedAt ?? 0) - (a.lastCheckedAt ?? 0));
+    return {
+      generatedAt: now,
+      scope: context.allowAnyOwner ? "all" : "owner",
+      total: watches.length,
+      byStatus,
+      byKind,
+      active,
+      nextDueAt,
+      oldestOverdueAt,
+      oldestStaleLeaseAt,
+      recentFailures: recentFailures.slice(0, 5),
+    };
   }
 
   cancelWatch(context: WatchManagementContext, id: string): WatchRecord | undefined {

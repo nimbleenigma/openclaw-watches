@@ -247,6 +247,46 @@ describe("WatchManagementService", () => {
     expect(wakeScheduler).toHaveBeenCalledTimes(2);
   });
 
+  it("computes watch diagnostics for the current owner", () => {
+    const store = createMemoryStore();
+    const manager = createWatchManagementService({
+      getStore: () => store,
+      config: DEFAULT_WATCHES_CONFIG,
+      now: () => 1_000_000,
+      idGenerator: () => `w_${store.watches.size + 1}`,
+    });
+    const alice = createContext("telegram:alice");
+    const bob = createContext("telegram:bob");
+    const watch = manager.createUrlContainsWatch(alice, {
+      url: "https://example.com",
+      text: "hello",
+    });
+    manager.createModelAvailabilityWatch(bob, { model: "gpt-5.5" });
+    const stored = store.watches.get(watch.id);
+    if (!stored) {
+      throw new Error("watch was not created");
+    }
+    stored.lastCheckedAt = 100_000;
+    stored.nextCheckAt = 800_000;
+    stored.claimedUntil = 900_000;
+    stored.lastError = "HTTP 403";
+    stored.errorCount = 2;
+
+    const diagnostics = manager.getDiagnostics(alice);
+    expect(diagnostics.scope).toBe("owner");
+    expect(diagnostics.total).toBe(1);
+    expect(diagnostics.byStatus.active).toBe(1);
+    expect(diagnostics.byKind.url).toBe(1);
+    expect(diagnostics.byKind.model).toBe(0);
+    expect(diagnostics.active.total).toBe(1);
+    expect(diagnostics.active.degraded).toBe(1);
+    expect(diagnostics.active.overdue).toBe(1);
+    expect(diagnostics.active.due).toBe(1);
+    expect(diagnostics.active.staleLeases).toBe(1);
+    expect(diagnostics.oldestStaleLeaseAt).toBe(900_000);
+    expect(diagnostics.recentFailures).toMatchObject([{ id: watch.id, lastError: "HTTP 403" }]);
+  });
+
   it("creates URL page-text watches through the programmatic service", () => {
     const store = createMemoryStore();
     const manager = createWatchManagementService({

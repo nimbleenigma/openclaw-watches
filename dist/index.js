@@ -61,6 +61,42 @@ function requireGitHubPrRef(input) {
 function formatGitHubPrRef(source) {
 	return `${source.owner}/${source.repo}#${source.number}`;
 }
+//#endregion
+//#region src/health.ts
+const OVERDUE_GRACE_MS$1 = 6e4;
+function notificationState(watch) {
+	if (watch.lastNotifiedHash && watch.lastResultHash && watch.lastNotifiedHash === watch.lastResultHash) return "delivered";
+	if (!watch.lastNotifiedHash) return "not_triggered";
+	return "unknown";
+}
+function getWatchHealth(watch, now = Date.now()) {
+	const notification = notificationState(watch);
+	if (watch.status !== "active") return {
+		state: watch.status,
+		summary: watch.status === "failed" ? "terminal failure" : watch.status,
+		notification
+	};
+	if (watch.lastError) return {
+		state: "degraded",
+		summary: watch.errorCount > 0 ? `last check failed; retrying (errors: ${watch.errorCount})` : "last check failed; retrying",
+		notification
+	};
+	if (!watch.lastCheckedAt) return {
+		state: "pending",
+		summary: "waiting for first check",
+		notification
+	};
+	if (watch.nextCheckAt && watch.nextCheckAt < now - OVERDUE_GRACE_MS$1) return {
+		state: "overdue",
+		summary: "next check is overdue",
+		notification
+	};
+	return {
+		state: "ok",
+		summary: "checking normally",
+		notification
+	};
+}
 const ALLOWED_REGEX_FLAGS = new Set(["i", "m"]);
 function findClosingSlash(value) {
 	let escaped = false;
@@ -465,6 +501,7 @@ function parseWatchesCommand(args) {
 		action: "list",
 		includeAll: true
 	};
+	if (/^health$/i.test(trimmed)) return { action: "health" };
 	const first = splitFirstToken(trimmed);
 	const action = first.token.toLowerCase();
 	if (action === "show") {
@@ -489,11 +526,12 @@ function parseWatchesCommand(args) {
 	}
 	return {
 		action: "error",
-		message: "Usage: /watches [all|show <id>|cancel <id>]"
+		message: "Usage: /watches [all|health|show <id>|cancel <id>]"
 	};
 }
 //#endregion
 //#region src/management.ts
+const OVERDUE_GRACE_MS = 6e4;
 var WatchManagementError = class extends Error {
 	constructor(message) {
 		super(message);
@@ -549,6 +587,22 @@ function validateExpiryMs(value) {
 	const expiryMs = Math.trunc(value);
 	if (!Number.isFinite(expiryMs) || expiryMs < 36e5 || expiryMs > 6048e5) throw new WatchManagementError("Watch expiry must be between 1 hour and 7 days.");
 	return expiryMs;
+}
+function emptyStatusCounts() {
+	return {
+		active: 0,
+		cancelled: 0,
+		expired: 0,
+		failed: 0,
+		triggered: 0
+	};
+}
+function emptyKindCounts() {
+	return {
+		github_pr: 0,
+		model: 0,
+		url: 0
+	};
 }
 var WatchManagementService = class {
 	deps;
@@ -712,6 +766,94 @@ var WatchManagementService = class {
 		const limit = Math.max(1, Math.min(params.limit ?? 5, 20));
 		return events.slice(-limit);
 	}
+	getDiagnostics(context) {
+		const now = nowMs(this.deps);
+		const watches = this.deps.getStore().listWatches({
+			ownerKey: context.allowAnyOwner ? void 0 : context.ownerKey,
+			includeAll: true,
+			limit: 500
+		});
+		const byStatus = emptyStatusCounts();
+		const byKind = emptyKindCounts();
+		const active = {
+			total: 0,
+			pendingFirstCheck: 0,
+			ok: 0,
+			degraded: 0,
+			overdue: 0,
+			due: 0,
+			leased: 0,
+			staleLeases: 0,
+			coolingDown: 0,
+			withErrors: 0,
+			notificationDelivered: 0
+		};
+		let nextDueAt;
+		let oldestOverdueAt;
+		let oldestStaleLeaseAt;
+		const recentFailures = [];
+		for (const watch of watches) {
+			byStatus[watch.status] += 1;
+			byKind[watch.kind] += 1;
+			if (watch.lastError) recentFailures.push({
+				id: watch.id,
+				title: watch.title,
+				kind: watch.kind,
+				status: watch.status,
+				errorCount: watch.errorCount,
+				lastError: watch.lastError,
+				lastCheckedAt: watch.lastCheckedAt,
+				nextCheckAt: watch.nextCheckAt
+			});
+			if (watch.status !== "active") continue;
+			active.total += 1;
+			const health = getWatchHealth(watch, now);
+			if (health.notification === "delivered") active.notificationDelivered += 1;
+			const nextCheckAt = watch.nextCheckAt;
+			if (nextCheckAt != null && nextCheckAt < now - OVERDUE_GRACE_MS) {
+				active.overdue += 1;
+				if (oldestOverdueAt == null || nextCheckAt < oldestOverdueAt) oldestOverdueAt = nextCheckAt;
+			}
+			switch (health.state) {
+				case "pending":
+					active.pendingFirstCheck += 1;
+					break;
+				case "ok":
+					active.ok += 1;
+					break;
+				case "degraded":
+					active.degraded += 1;
+					break;
+				case "overdue": break;
+				case "cancelled":
+				case "expired":
+				case "failed":
+				case "triggered": break;
+			}
+			if (watch.nextCheckAt && watch.nextCheckAt <= now) active.due += 1;
+			if (watch.nextCheckAt && (nextDueAt == null || watch.nextCheckAt < nextDueAt)) nextDueAt = watch.nextCheckAt;
+			if (watch.claimedUntil && watch.claimedUntil > now) active.leased += 1;
+			if (watch.claimedUntil && watch.claimedUntil <= now) {
+				active.staleLeases += 1;
+				if (oldestStaleLeaseAt == null || watch.claimedUntil < oldestStaleLeaseAt) oldestStaleLeaseAt = watch.claimedUntil;
+			}
+			if (watch.cooldownUntil && watch.cooldownUntil > now) active.coolingDown += 1;
+			if (watch.errorCount > 0 || watch.lastError) active.withErrors += 1;
+		}
+		recentFailures.sort((a, b) => (b.lastCheckedAt ?? 0) - (a.lastCheckedAt ?? 0));
+		return {
+			generatedAt: now,
+			scope: context.allowAnyOwner ? "all" : "owner",
+			total: watches.length,
+			byStatus,
+			byKind,
+			active,
+			nextDueAt,
+			oldestOverdueAt,
+			oldestStaleLeaseAt,
+			recentFailures: recentFailures.slice(0, 5)
+		};
+	}
 	cancelWatch(context, id) {
 		const cancelled = this.deps.getStore().cancelWatch({
 			id,
@@ -840,15 +982,48 @@ function formatStatusPrefix(status) {
 	return status;
 }
 function formatWatchListItem(watch, now = Date.now()) {
-	const lines = [`${watch.id}  ${formatStatusPrefix(watch.status)}`, `  ${watch.title}`];
+	const health = getWatchHealth(watch, now);
+	const lines = [
+		`${watch.id}  ${formatStatusPrefix(watch.status)}  health: ${health.state}`,
+		`  ${watch.title}`,
+		`  Health: ${health.summary}`
+	];
 	if (watch.status === "active") lines.push(`  Next: ${formatRelativeOnly(watch.nextCheckAt, now)} | Expires: ${formatRelativeOnly(watch.expiresAt, now)}`);
 	const lastResult = watch.lastResultSummary ? `${compactText(watch.lastResultSummary, 96)} (${formatRelativeOnly(watch.lastCheckedAt, now)})` : "none";
 	lines.push(`  Last: ${lastResult}`);
 	if (watch.lastError) lines.push(`  Error: ${compactText(watch.lastError, 96)} (count: ${watch.errorCount})`);
+	if (health.notification === "delivered") lines.push("  Notification: delivered");
 	return lines.join("\n");
 }
 function formatWatchList(title, watches, now = Date.now()) {
 	return [`${title}: ${watches.length}`, ...watches.map((watch) => formatWatchListItem(watch, now))].join("\n\n");
+}
+function formatCountLine(label, counts) {
+	return `- ${label}: ${Object.entries(counts).filter(([, count]) => count > 0).map(([key, count]) => `${key}: ${count}`).join(", ") || "none"}`;
+}
+function formatDiagnosticFailure(failure, now) {
+	const checked = failure.lastCheckedAt ? ` | checked ${formatRelativeOnly(failure.lastCheckedAt, now)}` : "";
+	const next = failure.nextCheckAt ? ` | next ${formatRelativeOnly(failure.nextCheckAt, now)}` : "";
+	return `- ${failure.id} ${failure.status} ${failure.title} | errors ${failure.errorCount}${checked}${next}: ${compactText(failure.lastError, 120)}`;
+}
+function formatWatchDiagnostics(diagnostics) {
+	const now = diagnostics.generatedAt;
+	const lines = [
+		"Watches health",
+		`- scope: ${diagnostics.scope}`,
+		`- total watches: ${diagnostics.total}`,
+		formatCountLine("status", diagnostics.byStatus),
+		formatCountLine("type", diagnostics.byKind),
+		`- active: ${diagnostics.active.total}`,
+		`- scheduler pressure: due ${diagnostics.active.due}, overdue ${diagnostics.active.overdue}, leased ${diagnostics.active.leased}, stale leases ${diagnostics.active.staleLeases}, cooling down ${diagnostics.active.coolingDown}`,
+		`- active health: ok ${diagnostics.active.ok}, pending ${diagnostics.active.pendingFirstCheck}, degraded ${diagnostics.active.degraded}, with errors ${diagnostics.active.withErrors}`,
+		`- next due: ${formatRelativeTime(diagnostics.nextDueAt, now)}`,
+		`- oldest overdue: ${formatRelativeTime(diagnostics.oldestOverdueAt, now)}`,
+		`- oldest stale lease: ${formatRelativeTime(diagnostics.oldestStaleLeaseAt, now)}`,
+		`- delivered terminal notifications: ${diagnostics.active.notificationDelivered}`
+	];
+	if (diagnostics.recentFailures.length > 0) lines.push("", "Recent failures:", ...diagnostics.recentFailures.map((failure) => formatDiagnosticFailure(failure, now)));
+	return lines.join("\n");
 }
 function formatTerminalTimestamp(watch) {
 	switch (watch.status) {
@@ -864,9 +1039,11 @@ function formatWatchEvent(event) {
 	return `- ${formatTimestamp(event.createdAt)} | ${event.eventType}${summary}`;
 }
 function formatWatchDetails(watch, events = [], now = Date.now()) {
+	const health = getWatchHealth(watch, now);
 	const lines = [
 		`Watch ${watch.id}`,
 		`- status: ${watch.status}`,
+		`- health: ${health.state} - ${health.summary}`,
 		`- title: ${watch.title}`,
 		`- type: ${formatWatchType(watch.kind)}`,
 		`- source: ${formatWatchSource(watch.kind, watch.source)}`,
@@ -878,6 +1055,7 @@ function formatWatchDetails(watch, events = [], now = Date.now()) {
 		`- updated: ${formatTimestamp(watch.updatedAt)}`,
 		`- last check: ${formatTimestamp(watch.lastCheckedAt)}`,
 		`- last result: ${watch.lastResultSummary ? compactText(watch.lastResultSummary, 180) : "none"}`,
+		`- notification: ${health.notification}`,
 		`- errors: ${watch.errorCount}`
 	];
 	const terminalTimestamp = formatTerminalTimestamp(watch);
@@ -905,6 +1083,7 @@ function usage() {
 		"  (PR changed watches fire when the PR snapshot changes: state, draft, merged state, head, checks, or reviews.)",
 		"/watches",
 		"/watches all",
+		"/watches health",
 		"/watches show <id>",
 		"/watches cancel <id>"
 	].join("\n");
@@ -957,6 +1136,7 @@ function createWatchesCommand(deps) {
 				return { text: formatWatchDetails(watch, manager.showWatchEvents(managementContext, parsed.id), commandNow(deps)) };
 			}
 			if (parsed.action === "cancel") return { text: formatCancelResult(manager.cancelWatch(managementContext, parsed.id), parsed.id) };
+			if (parsed.action === "health") return { text: formatWatchDiagnostics(manager.getDiagnostics(managementContext)) };
 			const watches = manager.listWatches(managementContext, {
 				includeAll: parsed.includeAll,
 				limit: 50
@@ -2536,6 +2716,7 @@ const WatchManagementToolSchema = Type.Object({
 			"create_github_pr_approved",
 			"create_github_pr_changes_requested",
 			"create_github_pr_state",
+			"health",
 			"list",
 			"show",
 			"cancel"
@@ -2609,6 +2790,7 @@ function serializeWatch(watch) {
 		lastResultSummary: watch.lastResultSummary,
 		lastError: watch.lastError,
 		errorCount: watch.errorCount,
+		health: getWatchHealth(watch),
 		createdAt: watch.createdAt,
 		updatedAt: watch.updatedAt,
 		triggeredAt: watch.triggeredAt,
@@ -2761,6 +2943,11 @@ function createWatchesManagementTool(params) {
 							includeAll: raw.include_all === true,
 							limit: readLimit(raw.limit)
 						}).map(serializeWatch)
+					});
+					case "health": return jsonResult({
+						ok: true,
+						action,
+						diagnostics: params.manager.getDiagnostics(context)
 					});
 					case "show": {
 						const watchId = requireString(raw, "watch_id");

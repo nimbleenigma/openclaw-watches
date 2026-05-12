@@ -1,5 +1,6 @@
 import { Type } from "typebox";
 import { jsonResult, type AnyAgentTool, type OpenClawPluginToolContext } from "../api.js";
+import { getWatchHealth, type WatchHealth } from "./health.js";
 import type { WatchManagementContext, WatchManagementService } from "./management.js";
 import type { WatchCondition, WatchEventRecord, WatchRecord, WatchSource } from "./types.js";
 
@@ -14,6 +15,7 @@ type WatchToolAction =
   | "create_github_pr_approved"
   | "create_github_pr_changes_requested"
   | "create_github_pr_state"
+  | "health"
   | "list"
   | "show"
   | "cancel";
@@ -47,6 +49,7 @@ type WatchToolRecord = {
   lastResultSummary?: string;
   lastError?: string;
   errorCount: number;
+  health: WatchHealth;
   createdAt: number;
   updatedAt: number;
   triggeredAt?: number;
@@ -75,6 +78,7 @@ const WatchManagementToolSchema = Type.Object({
       "create_github_pr_approved",
       "create_github_pr_changes_requested",
       "create_github_pr_state",
+      "health",
       "list",
       "show",
       "cancel",
@@ -181,6 +185,7 @@ function serializeWatch(watch: WatchRecord): WatchToolRecord {
     lastResultSummary: watch.lastResultSummary,
     lastError: watch.lastError,
     errorCount: watch.errorCount,
+    health: getWatchHealth(watch),
     createdAt: watch.createdAt,
     updatedAt: watch.updatedAt,
     triggeredAt: watch.triggeredAt,
@@ -343,6 +348,13 @@ export function createWatchesManagementTool(params: {
               })
               .map(serializeWatch);
             return jsonResult({ ok: true, action, watches });
+          }
+          case "health": {
+            return jsonResult({
+              ok: true,
+              action,
+              diagnostics: params.manager.getDiagnostics(context),
+            });
           }
           case "show": {
             const watchId = requireString(raw, "watch_id");

@@ -283,7 +283,17 @@ describe("watches_manage tool", () => {
     const aliceList = await tool.execute("tool-4", { action: "list" });
     expect(
       (details(aliceList) as { watches: Array<{ id: string; status: string }> }).watches,
-    ).toEqual([expect.objectContaining({ id: "w_1", status: "active" })]);
+    ).toEqual([
+      expect.objectContaining({
+        id: "w_1",
+        status: "active",
+        health: {
+          state: "pending",
+          summary: "waiting for first check",
+          notification: "not_triggered",
+        },
+      }),
+    ]);
     const aliceShow = await tool.execute("tool-5", { action: "show", watch_id: "w_1" });
     expect(details(aliceShow)).toMatchObject({
       ok: true,

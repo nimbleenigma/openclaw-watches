@@ -27,6 +27,7 @@ export type ParsedWatchesCommand =
   | { action: "list"; includeAll: boolean }
   | { action: "show"; id: string }
   | { action: "cancel"; id: string }
+  | { action: "health" }
   | { action: "help" }
   | { action: "error"; message: string };
 
@@ -395,6 +396,9 @@ export function parseWatchesCommand(args?: string): ParsedWatchesCommand {
   if (/^all$/i.test(trimmed)) {
     return { action: "list", includeAll: true };
   }
+  if (/^health$/i.test(trimmed)) {
+    return { action: "health" };
+  }
   const first = splitFirstToken(trimmed);
   const action = first.token.toLowerCase();
   if (action === "show") {
@@ -407,5 +411,5 @@ export function parseWatchesCommand(args?: string): ParsedWatchesCommand {
       ? { action: "cancel", id }
       : { action: "error", message: "Usage: /watches cancel <id>" };
   }
-  return { action: "error", message: "Usage: /watches [all|show <id>|cancel <id>]" };
+  return { action: "error", message: "Usage: /watches [all|health|show <id>|cancel <id>]" };
 }

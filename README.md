@@ -34,12 +34,17 @@ More copy-paste examples live in [examples/README.md](examples/README.md).
 ```text
 /watches
 /watches all
+/watches health
 /watches show <watch-id>
 /watches cancel <watch-id>
 ```
 
 `/watches show <watch-id>` includes the watch source, condition, schedule,
 last result, error count, and recent event history.
+
+`/watches health` summarizes owner-scoped watch health and scheduler pressure:
+active counts, status/type breakdowns, due and overdue checks, stale leases,
+cooldowns, delivered notifications, and recent failures.
 
 ## Install
 

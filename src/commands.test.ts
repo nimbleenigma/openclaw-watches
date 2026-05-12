@@ -138,6 +138,7 @@ describe("watch commands", () => {
     expect(listed.text).toContain("Next: now");
     expect(listed.text).toContain("Expires: in 1d");
     expect(listed.text).toContain("Last:");
+    expect(listed.text).toContain("health: pending");
   });
 
   it("creates watches with per-watch schedule suffixes", async () => {
@@ -173,6 +174,7 @@ describe("watch commands", () => {
     const shown = await watchCommand.handler(createContext(`show ${id}`, "alice") as never);
     expect(shown.text).toContain(`Watch ${id}`);
     expect(shown.text).toContain("- status: active");
+    expect(shown.text).toContain("- health: pending - waiting for first check");
     expect(shown.text).toContain("Recent events:");
     expect(shown.text).toContain("created");
 
@@ -220,10 +222,45 @@ describe("watch commands", () => {
     }
     watch.lastResultSummary = "Text not found: hello HTTP 200 https://example.com/";
     watch.lastError = "HTTP 403 fetching https://example.com/";
+    watch.errorCount = 2;
 
     const listed = await watchesCommand.handler(createContext("all") as never);
+    expect(listed.text).toContain("health: degraded");
+    expect(listed.text).toContain("last check failed; retrying");
     expect(listed.text).toContain("Last: Text not found");
     expect(listed.text).toContain("Error: HTTP 403");
+    expect(listed.text).toContain("count: 2");
+  });
+
+  it("reports owner-scoped watch health diagnostics", async () => {
+    const store = createMemoryStore();
+    const [watchCommand, watchesCommand] = createWatchesCommands({
+      api: { runtime: {} as never },
+      getStore: () => store,
+      config: DEFAULT_WATCHES_CONFIG,
+      now: () => 1_000_000,
+    });
+    await watchCommand.handler(createContext('url https://example.com contains "hello"') as never);
+    const id = [...store.watches.keys()][0];
+    const watch = store.watches.get(id);
+    if (!watch) {
+      throw new Error("watch was not created");
+    }
+    watch.lastCheckedAt = 100_000;
+    watch.nextCheckAt = 800_000;
+    watch.lastError = "HTTP 403 fetching https://example.com/";
+    watch.errorCount = 2;
+
+    const health = await watchesCommand.handler(createContext("health") as never);
+    expect(health.text).toContain("Watches health");
+    expect(health.text).toContain("- scope: owner");
+    expect(health.text).toContain("- total watches: 1");
+    expect(health.text).toContain("active: 1");
+    expect(health.text).toContain("overdue 1");
+    expect(health.text).toContain("degraded 1");
+    expect(health.text).toContain("with errors 1");
+    expect(health.text).toContain("Recent failures:");
+    expect(health.text).toContain("HTTP 403");
   });
 
   it("cancels only watches owned by the caller and reports final status", async () => {

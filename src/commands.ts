@@ -4,10 +4,12 @@ import type {
   PluginCommandContext,
 } from "../api.js";
 import { formatGitHubPrRef } from "./github-pr.js";
+import { getWatchHealth } from "./health.js";
 import {
   createWatchManagementService,
   type WatchManagementDeps,
   type WatchManagementContext,
+  type WatchDiagnostics,
 } from "./management.js";
 import { parseWatchCommand, parseWatchesCommand } from "./parse.js";
 import type {
@@ -206,7 +208,12 @@ function formatStatusPrefix(status: WatchStatus): string {
 }
 
 function formatWatchListItem(watch: WatchRecord, now = Date.now()): string {
-  const lines = [`${watch.id}  ${formatStatusPrefix(watch.status)}`, `  ${watch.title}`];
+  const health = getWatchHealth(watch, now);
+  const lines = [
+    `${watch.id}  ${formatStatusPrefix(watch.status)}  health: ${health.state}`,
+    `  ${watch.title}`,
+    `  Health: ${health.summary}`,
+  ];
   if (watch.status === "active") {
     lines.push(
       `  Next: ${formatRelativeOnly(watch.nextCheckAt, now)} | Expires: ${formatRelativeOnly(
@@ -222,13 +229,65 @@ function formatWatchListItem(watch: WatchRecord, now = Date.now()): string {
   if (watch.lastError) {
     lines.push(`  Error: ${compactText(watch.lastError, 96)} (count: ${watch.errorCount})`);
   }
+  if (health.notification === "delivered") {
+    lines.push("  Notification: delivered");
+  }
   return lines.join("\n");
 }
 
 function formatWatchList(title: string, watches: WatchRecord[], now = Date.now()): string {
-  return [`${title}: ${watches.length}`, ...watches.map((watch) => formatWatchListItem(watch, now))].join(
-    "\n\n",
-  );
+  return [
+    `${title}: ${watches.length}`,
+    ...watches.map((watch) => formatWatchListItem(watch, now)),
+  ].join("\n\n");
+}
+
+function formatCountLine(label: string, counts: Record<string, number>): string {
+  const rendered = Object.entries(counts)
+    .filter(([, count]) => count > 0)
+    .map(([key, count]) => `${key}: ${count}`)
+    .join(", ");
+  return `- ${label}: ${rendered || "none"}`;
+}
+
+function formatDiagnosticFailure(
+  failure: WatchDiagnostics["recentFailures"][number],
+  now: number,
+): string {
+  const checked = failure.lastCheckedAt
+    ? ` | checked ${formatRelativeOnly(failure.lastCheckedAt, now)}`
+    : "";
+  const next = failure.nextCheckAt ? ` | next ${formatRelativeOnly(failure.nextCheckAt, now)}` : "";
+  return `- ${failure.id} ${failure.status} ${failure.title} | errors ${failure.errorCount}${checked}${next}: ${compactText(
+    failure.lastError,
+    120,
+  )}`;
+}
+
+function formatWatchDiagnostics(diagnostics: WatchDiagnostics): string {
+  const now = diagnostics.generatedAt;
+  const lines = [
+    "Watches health",
+    `- scope: ${diagnostics.scope}`,
+    `- total watches: ${diagnostics.total}`,
+    formatCountLine("status", diagnostics.byStatus),
+    formatCountLine("type", diagnostics.byKind),
+    `- active: ${diagnostics.active.total}`,
+    `- scheduler pressure: due ${diagnostics.active.due}, overdue ${diagnostics.active.overdue}, leased ${diagnostics.active.leased}, stale leases ${diagnostics.active.staleLeases}, cooling down ${diagnostics.active.coolingDown}`,
+    `- active health: ok ${diagnostics.active.ok}, pending ${diagnostics.active.pendingFirstCheck}, degraded ${diagnostics.active.degraded}, with errors ${diagnostics.active.withErrors}`,
+    `- next due: ${formatRelativeTime(diagnostics.nextDueAt, now)}`,
+    `- oldest overdue: ${formatRelativeTime(diagnostics.oldestOverdueAt, now)}`,
+    `- oldest stale lease: ${formatRelativeTime(diagnostics.oldestStaleLeaseAt, now)}`,
+    `- delivered terminal notifications: ${diagnostics.active.notificationDelivered}`,
+  ];
+  if (diagnostics.recentFailures.length > 0) {
+    lines.push(
+      "",
+      "Recent failures:",
+      ...diagnostics.recentFailures.map((failure) => formatDiagnosticFailure(failure, now)),
+    );
+  }
+  return lines.join("\n");
 }
 
 function formatTerminalTimestamp(watch: WatchRecord): string | undefined {
@@ -257,9 +316,11 @@ function formatWatchDetails(
   events: WatchEventRecord[] = [],
   now = Date.now(),
 ): string {
+  const health = getWatchHealth(watch, now);
   const lines = [
     `Watch ${watch.id}`,
     `- status: ${watch.status}`,
+    `- health: ${health.state} - ${health.summary}`,
     `- title: ${watch.title}`,
     `- type: ${formatWatchType(watch.kind)}`,
     `- source: ${formatWatchSource(watch.kind, watch.source)}`,
@@ -271,6 +332,7 @@ function formatWatchDetails(
     `- updated: ${formatTimestamp(watch.updatedAt)}`,
     `- last check: ${formatTimestamp(watch.lastCheckedAt)}`,
     `- last result: ${watch.lastResultSummary ? compactText(watch.lastResultSummary, 180) : "none"}`,
+    `- notification: ${health.notification}`,
     `- errors: ${watch.errorCount}`,
   ];
   const terminalTimestamp = formatTerminalTimestamp(watch);
@@ -305,6 +367,7 @@ function usage(): string {
     "  (PR changed watches fire when the PR snapshot changes: state, draft, merged state, head, checks, or reviews.)",
     "/watches",
     "/watches all",
+    "/watches health",
     "/watches show <id>",
     "/watches cancel <id>",
   ].join("\n");
@@ -406,6 +469,9 @@ function createWatchesCommand(deps: WatchesCommandDeps): OpenClawPluginCommandDe
         return {
           text: formatCancelResult(manager.cancelWatch(managementContext, parsed.id), parsed.id),
         };
+      }
+      if (parsed.action === "health") {
+        return { text: formatWatchDiagnostics(manager.getDiagnostics(managementContext)) };
       }
       const watches = manager.listWatches(managementContext, {
         includeAll: parsed.includeAll,
