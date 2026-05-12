@@ -377,7 +377,7 @@ export class WatchesStore {
       limit?: number;
     } = {},
   ): WatchRecord[] {
-    const limit = Math.max(1, Math.min(params.limit ?? 50, 200));
+    const limit = Math.max(1, Math.min(params.limit ?? 50, 1000));
     const rows = this.db
       .prepare(
         `SELECT * FROM watches

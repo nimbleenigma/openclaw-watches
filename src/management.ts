@@ -18,6 +18,7 @@ import type {
 
 type UrlContentMode = NonNullable<UrlWatchSource["contentMode"]>;
 const OVERDUE_GRACE_MS = 60_000;
+const DIAGNOSTICS_WATCH_LIMIT = 500;
 
 export type WatchManagementStore = {
   createWatch(input: CreateWatchInput): WatchRecord;
@@ -59,6 +60,7 @@ export type WatchDiagnostics = {
   generatedAt: number;
   scope: "owner" | "all";
   total: number;
+  truncated: boolean;
   byStatus: Record<WatchRecord["status"], number>;
   byKind: Record<WatchKind, number>;
   active: {
@@ -72,7 +74,11 @@ export type WatchDiagnostics = {
     staleLeases: number;
     coolingDown: number;
     withErrors: number;
-    notificationDelivered: number;
+  };
+  notifications: {
+    activeDelivered: number;
+    terminalDelivered: number;
+    unknown: number;
   };
   nextDueAt?: number;
   oldestOverdueAt?: number;
@@ -408,11 +414,13 @@ export class WatchManagementService {
 
   getDiagnostics(context: WatchManagementContext): WatchDiagnostics {
     const now = nowMs(this.deps);
-    const watches = this.deps.getStore().listWatches({
+    const listedWatches = this.deps.getStore().listWatches({
       ownerKey: context.allowAnyOwner ? undefined : context.ownerKey,
       includeAll: true,
-      limit: 500,
+      limit: DIAGNOSTICS_WATCH_LIMIT + 1,
     });
+    const truncated = listedWatches.length > DIAGNOSTICS_WATCH_LIMIT;
+    const watches = listedWatches.slice(0, DIAGNOSTICS_WATCH_LIMIT);
     const byStatus = emptyStatusCounts();
     const byKind = emptyKindCounts();
     const active = {
@@ -426,7 +434,11 @@ export class WatchManagementService {
       staleLeases: 0,
       coolingDown: 0,
       withErrors: 0,
-      notificationDelivered: 0,
+    };
+    const notifications = {
+      activeDelivered: 0,
+      terminalDelivered: 0,
+      unknown: 0,
     };
     let nextDueAt: number | undefined;
     let oldestOverdueAt: number | undefined;
@@ -436,6 +448,16 @@ export class WatchManagementService {
     for (const watch of watches) {
       byStatus[watch.status] += 1;
       byKind[watch.kind] += 1;
+      const health = getWatchHealth(watch, now);
+      if (health.notification === "delivered") {
+        if (watch.status === "active") {
+          notifications.activeDelivered += 1;
+        } else {
+          notifications.terminalDelivered += 1;
+        }
+      } else if (health.notification === "unknown") {
+        notifications.unknown += 1;
+      }
       if (watch.lastError) {
         recentFailures.push({
           id: watch.id,
@@ -452,10 +474,6 @@ export class WatchManagementService {
         continue;
       }
       active.total += 1;
-      const health = getWatchHealth(watch, now);
-      if (health.notification === "delivered") {
-        active.notificationDelivered += 1;
-      }
       const nextCheckAt = watch.nextCheckAt;
       if (nextCheckAt != null && nextCheckAt < now - OVERDUE_GRACE_MS) {
         active.overdue += 1;
@@ -509,9 +527,11 @@ export class WatchManagementService {
       generatedAt: now,
       scope: context.allowAnyOwner ? "all" : "owner",
       total: watches.length,
+      truncated,
       byStatus,
       byKind,
       active,
+      notifications,
       nextDueAt,
       oldestOverdueAt,
       oldestStaleLeaseAt,

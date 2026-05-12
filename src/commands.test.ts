@@ -250,15 +250,27 @@ describe("watch commands", () => {
     watch.nextCheckAt = 800_000;
     watch.lastError = "HTTP 403 fetching https://example.com/";
     watch.errorCount = 2;
+    watch.lastResultHash = "hash-active";
+    watch.lastNotifiedHash = "hash-active";
+    await watchCommand.handler(createContext("url https://example.com/releases changed") as never);
+    const triggeredId = [...store.watches.keys()].find((watchId) => watchId !== id);
+    const triggered = triggeredId ? store.watches.get(triggeredId) : undefined;
+    if (!triggered) {
+      throw new Error("triggered watch was not created");
+    }
+    triggered.status = "triggered";
+    triggered.lastResultHash = "hash-triggered";
+    triggered.lastNotifiedHash = "hash-triggered";
 
     const health = await watchesCommand.handler(createContext("health") as never);
     expect(health.text).toContain("Watches health");
     expect(health.text).toContain("- scope: owner");
-    expect(health.text).toContain("- total watches: 1");
+    expect(health.text).toContain("- total watches: 2");
     expect(health.text).toContain("active: 1");
     expect(health.text).toContain("overdue 1");
     expect(health.text).toContain("degraded 1");
     expect(health.text).toContain("with errors 1");
+    expect(health.text).toContain("delivered notifications: active 1, terminal 1, unknown 0");
     expect(health.text).toContain("Recent failures:");
     expect(health.text).toContain("HTTP 403");
   });

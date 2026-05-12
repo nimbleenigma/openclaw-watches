@@ -269,7 +269,7 @@ function formatWatchDiagnostics(diagnostics: WatchDiagnostics): string {
   const lines = [
     "Watches health",
     `- scope: ${diagnostics.scope}`,
-    `- total watches: ${diagnostics.total}`,
+    `- total watches: ${diagnostics.total}${diagnostics.truncated ? "+" : ""}`,
     formatCountLine("status", diagnostics.byStatus),
     formatCountLine("type", diagnostics.byKind),
     `- active: ${diagnostics.active.total}`,
@@ -278,7 +278,7 @@ function formatWatchDiagnostics(diagnostics: WatchDiagnostics): string {
     `- next due: ${formatRelativeTime(diagnostics.nextDueAt, now)}`,
     `- oldest overdue: ${formatRelativeTime(diagnostics.oldestOverdueAt, now)}`,
     `- oldest stale lease: ${formatRelativeTime(diagnostics.oldestStaleLeaseAt, now)}`,
-    `- delivered terminal notifications: ${diagnostics.active.notificationDelivered}`,
+    `- delivered notifications: active ${diagnostics.notifications.activeDelivered}, terminal ${diagnostics.notifications.terminalDelivered}, unknown ${diagnostics.notifications.unknown}`,
   ];
   if (diagnostics.recentFailures.length > 0) {
     lines.push(

@@ -532,6 +532,7 @@ function parseWatchesCommand(args) {
 //#endregion
 //#region src/management.ts
 const OVERDUE_GRACE_MS = 6e4;
+const DIAGNOSTICS_WATCH_LIMIT = 500;
 var WatchManagementError = class extends Error {
 	constructor(message) {
 		super(message);
@@ -768,11 +769,13 @@ var WatchManagementService = class {
 	}
 	getDiagnostics(context) {
 		const now = nowMs(this.deps);
-		const watches = this.deps.getStore().listWatches({
+		const listedWatches = this.deps.getStore().listWatches({
 			ownerKey: context.allowAnyOwner ? void 0 : context.ownerKey,
 			includeAll: true,
-			limit: 500
+			limit: DIAGNOSTICS_WATCH_LIMIT + 1
 		});
+		const truncated = listedWatches.length > DIAGNOSTICS_WATCH_LIMIT;
+		const watches = listedWatches.slice(0, DIAGNOSTICS_WATCH_LIMIT);
 		const byStatus = emptyStatusCounts();
 		const byKind = emptyKindCounts();
 		const active = {
@@ -785,8 +788,12 @@ var WatchManagementService = class {
 			leased: 0,
 			staleLeases: 0,
 			coolingDown: 0,
-			withErrors: 0,
-			notificationDelivered: 0
+			withErrors: 0
+		};
+		const notifications = {
+			activeDelivered: 0,
+			terminalDelivered: 0,
+			unknown: 0
 		};
 		let nextDueAt;
 		let oldestOverdueAt;
@@ -795,6 +802,10 @@ var WatchManagementService = class {
 		for (const watch of watches) {
 			byStatus[watch.status] += 1;
 			byKind[watch.kind] += 1;
+			const health = getWatchHealth(watch, now);
+			if (health.notification === "delivered") if (watch.status === "active") notifications.activeDelivered += 1;
+			else notifications.terminalDelivered += 1;
+			else if (health.notification === "unknown") notifications.unknown += 1;
 			if (watch.lastError) recentFailures.push({
 				id: watch.id,
 				title: watch.title,
@@ -807,8 +818,6 @@ var WatchManagementService = class {
 			});
 			if (watch.status !== "active") continue;
 			active.total += 1;
-			const health = getWatchHealth(watch, now);
-			if (health.notification === "delivered") active.notificationDelivered += 1;
 			const nextCheckAt = watch.nextCheckAt;
 			if (nextCheckAt != null && nextCheckAt < now - OVERDUE_GRACE_MS) {
 				active.overdue += 1;
@@ -845,9 +854,11 @@ var WatchManagementService = class {
 			generatedAt: now,
 			scope: context.allowAnyOwner ? "all" : "owner",
 			total: watches.length,
+			truncated,
 			byStatus,
 			byKind,
 			active,
+			notifications,
 			nextDueAt,
 			oldestOverdueAt,
 			oldestStaleLeaseAt,
@@ -1011,7 +1022,7 @@ function formatWatchDiagnostics(diagnostics) {
 	const lines = [
 		"Watches health",
 		`- scope: ${diagnostics.scope}`,
-		`- total watches: ${diagnostics.total}`,
+		`- total watches: ${diagnostics.total}${diagnostics.truncated ? "+" : ""}`,
 		formatCountLine("status", diagnostics.byStatus),
 		formatCountLine("type", diagnostics.byKind),
 		`- active: ${diagnostics.active.total}`,
@@ -1020,7 +1031,7 @@ function formatWatchDiagnostics(diagnostics) {
 		`- next due: ${formatRelativeTime(diagnostics.nextDueAt, now)}`,
 		`- oldest overdue: ${formatRelativeTime(diagnostics.oldestOverdueAt, now)}`,
 		`- oldest stale lease: ${formatRelativeTime(diagnostics.oldestStaleLeaseAt, now)}`,
-		`- delivered terminal notifications: ${diagnostics.active.notificationDelivered}`
+		`- delivered notifications: active ${diagnostics.notifications.activeDelivered}, terminal ${diagnostics.notifications.terminalDelivered}, unknown ${diagnostics.notifications.unknown}`
 	];
 	if (diagnostics.recentFailures.length > 0) lines.push("", "Recent failures:", ...diagnostics.recentFailures.map((failure) => formatDiagnosticFailure(failure, now)));
 	return lines.join("\n");
@@ -2489,7 +2500,7 @@ var WatchesStore = class {
 		return row ? rowToWatch(row) : void 0;
 	}
 	listWatches(params = {}) {
-		const limit = Math.max(1, Math.min(params.limit ?? 50, 200));
+		const limit = Math.max(1, Math.min(params.limit ?? 50, 1e3));
 		return this.db.prepare(`SELECT * FROM watches
          WHERE (@owner_key IS NULL OR owner_key = @owner_key)
            AND (@include_all = 1 OR status = 'active')

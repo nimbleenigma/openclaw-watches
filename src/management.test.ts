@@ -271,20 +271,57 @@ describe("WatchManagementService", () => {
     stored.claimedUntil = 900_000;
     stored.lastError = "HTTP 403";
     stored.errorCount = 2;
+    stored.lastResultHash = "hash-active";
+    stored.lastNotifiedHash = "hash-active";
+    const triggered = manager.createUrlChangedWatch(alice, {
+      url: "https://example.com/releases",
+    });
+    const storedTriggered = store.watches.get(triggered.id);
+    if (!storedTriggered) {
+      throw new Error("triggered watch was not created");
+    }
+    storedTriggered.status = "triggered";
+    storedTriggered.lastResultHash = "hash-triggered";
+    storedTriggered.lastNotifiedHash = "hash-triggered";
 
     const diagnostics = manager.getDiagnostics(alice);
     expect(diagnostics.scope).toBe("owner");
-    expect(diagnostics.total).toBe(1);
+    expect(diagnostics.total).toBe(2);
+    expect(diagnostics.truncated).toBe(false);
     expect(diagnostics.byStatus.active).toBe(1);
-    expect(diagnostics.byKind.url).toBe(1);
+    expect(diagnostics.byStatus.triggered).toBe(1);
+    expect(diagnostics.byKind.url).toBe(2);
     expect(diagnostics.byKind.model).toBe(0);
     expect(diagnostics.active.total).toBe(1);
     expect(diagnostics.active.degraded).toBe(1);
     expect(diagnostics.active.overdue).toBe(1);
     expect(diagnostics.active.due).toBe(1);
     expect(diagnostics.active.staleLeases).toBe(1);
+    expect(diagnostics.notifications).toEqual({
+      activeDelivered: 1,
+      terminalDelivered: 1,
+      unknown: 0,
+    });
     expect(diagnostics.oldestStaleLeaseAt).toBe(900_000);
     expect(diagnostics.recentFailures).toMatchObject([{ id: watch.id, lastError: "HTTP 403" }]);
+  });
+
+  it("marks diagnostics truncated instead of silently implying exhaustive totals", () => {
+    const store = createMemoryStore();
+    const manager = createWatchManagementService({
+      getStore: () => store,
+      config: { ...DEFAULT_WATCHES_CONFIG, maxActivePerOwner: 1_000 },
+      now: () => 1_000_000,
+      idGenerator: () => `w_${store.watches.size + 1}`,
+    });
+    const alice = createContext("telegram:alice");
+    for (let index = 0; index < 501; index += 1) {
+      manager.createUrlChangedWatch(alice, { url: `https://example.com/${index}` });
+    }
+
+    const diagnostics = manager.getDiagnostics(alice);
+    expect(diagnostics.total).toBe(500);
+    expect(diagnostics.truncated).toBe(true);
   });
 
   it("creates URL page-text watches through the programmatic service", () => {
