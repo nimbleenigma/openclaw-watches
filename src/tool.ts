@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import { jsonResult, type AnyAgentTool, type OpenClawPluginToolContext } from "../api.js";
 import type { WatchManagementContext, WatchManagementService } from "./management.js";
-import type { WatchCondition, WatchRecord, WatchSource } from "./types.js";
+import type { WatchCondition, WatchEventRecord, WatchRecord, WatchSource } from "./types.js";
 
 type WatchToolAction =
   | "create_model_availability"
@@ -52,6 +52,14 @@ type WatchToolRecord = {
   triggeredAt?: number;
   expiredAt?: number;
   cancelledAt?: number;
+};
+
+type WatchToolEvent = {
+  id: string;
+  watchId: string;
+  eventType: WatchEventRecord["eventType"];
+  summary?: string;
+  createdAt: number;
 };
 
 const WatchManagementToolSchema = Type.Object({
@@ -178,6 +186,16 @@ function serializeWatch(watch: WatchRecord): WatchToolRecord {
     triggeredAt: watch.triggeredAt,
     expiredAt: watch.expiredAt,
     cancelledAt: watch.cancelledAt,
+  };
+}
+
+function serializeEvent(event: WatchEventRecord): WatchToolEvent {
+  return {
+    id: event.id,
+    watchId: event.watchId,
+    eventType: event.eventType,
+    summary: event.summary,
+    createdAt: event.createdAt,
   };
 }
 
@@ -331,7 +349,12 @@ export function createWatchesManagementTool(params: {
             const watch = params.manager.showWatch(context, watchId);
             return jsonResult(
               watch
-                ? { ok: true, action, watch: serializeWatch(watch) }
+                ? {
+                    ok: true,
+                    action,
+                    watch: serializeWatch(watch),
+                    events: params.manager.showWatchEvents(context, watchId).map(serializeEvent),
+                  }
                 : { ok: false, action, error: `No watch found for ${watchId}.` },
             );
           }

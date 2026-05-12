@@ -6,7 +6,7 @@ import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
 import fs from "node:fs";
 import path from "node:path";
 import { Type } from "typebox";
-//#region ../openclaw-watches/src/github-pr.ts
+//#region src/github-pr.ts
 const OWNER_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
 const REPO_PATTERN = /^[A-Za-z0-9._-]{1,100}$/;
 const OWNER_REPO_REF_PATTERN = /^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)#([1-9]\d*)$/;
@@ -493,7 +493,7 @@ function parseWatchesCommand(args) {
 	};
 }
 //#endregion
-//#region ../openclaw-watches/src/management.ts
+//#region src/management.ts
 var WatchManagementError = class extends Error {
 	constructor(message) {
 		super(message);
@@ -551,6 +551,7 @@ function validateExpiryMs(value) {
 	return expiryMs;
 }
 var WatchManagementService = class {
+	deps;
 	constructor(deps) {
 		this.deps = deps;
 	}
@@ -726,7 +727,7 @@ function createWatchManagementService(deps) {
 	return new WatchManagementService(deps);
 }
 //#endregion
-//#region ../openclaw-watches/src/commands.ts
+//#region src/commands.ts
 function resolveWatchOwnerKey(ctx) {
 	const sender = ctx.senderId?.trim();
 	if (sender) return `${ctx.channel}:${sender}`;
@@ -771,6 +772,7 @@ function formatTimestamp(value) {
 }
 function formatDuration(ms) {
 	const abs = Math.abs(ms);
+	if (abs < 1e3) return "now";
 	for (const [label, unitMs] of [
 		["d", 864e5],
 		["h", 36e5],
@@ -781,9 +783,14 @@ function formatDuration(ms) {
 }
 function formatRelativeTime(value, now = Date.now()) {
 	if (!value) return "(none)";
+	return `${formatTimestamp(value)} (${formatRelativeOnly(value, now)})`;
+}
+function formatRelativeOnly(value, now = Date.now()) {
+	if (!value) return "(none)";
 	const delta = value - now;
-	const suffix = delta >= 0 ? "from now" : "ago";
-	return `${formatTimestamp(value)} (${formatDuration(delta)} ${suffix})`;
+	const duration = formatDuration(delta);
+	if (duration === "now") return "now";
+	return delta >= 0 ? `in ${duration}` : `${duration} ago`;
 }
 function compactText(value, maxChars = 120) {
 	const normalized = value.replace(/\s+/g, " ").trim();
@@ -832,19 +839,16 @@ function formatStatusPrefix(status) {
 	}
 	return status;
 }
-function formatWatchLine(watch) {
-	const parts = [
-		`- ${watch.id}`,
-		formatStatusPrefix(watch.status),
-		watch.title
-	];
-	if (watch.status === "active") {
-		parts.push(`next: ${formatRelativeTime(watch.nextCheckAt)}`);
-		parts.push(`expires: ${formatRelativeTime(watch.expiresAt)}`);
-	}
-	parts.push(`last: ${watch.lastResultSummary ? `${compactText(watch.lastResultSummary)} at ${formatTimestamp(watch.lastCheckedAt)}` : "none"}`);
-	if (watch.lastError) parts.push(`error: ${compactText(watch.lastError)} (count: ${watch.errorCount})`);
-	return parts.join(" | ");
+function formatWatchListItem(watch, now = Date.now()) {
+	const lines = [`${watch.id}  ${formatStatusPrefix(watch.status)}`, `  ${watch.title}`];
+	if (watch.status === "active") lines.push(`  Next: ${formatRelativeOnly(watch.nextCheckAt, now)} | Expires: ${formatRelativeOnly(watch.expiresAt, now)}`);
+	const lastResult = watch.lastResultSummary ? `${compactText(watch.lastResultSummary, 96)} (${formatRelativeOnly(watch.lastCheckedAt, now)})` : "none";
+	lines.push(`  Last: ${lastResult}`);
+	if (watch.lastError) lines.push(`  Error: ${compactText(watch.lastError, 96)} (count: ${watch.errorCount})`);
+	return lines.join("\n");
+}
+function formatWatchList(title, watches, now = Date.now()) {
+	return [`${title}: ${watches.length}`, ...watches.map((watch) => formatWatchListItem(watch, now))].join("\n\n");
 }
 function formatTerminalTimestamp(watch) {
 	switch (watch.status) {
@@ -859,7 +863,7 @@ function formatWatchEvent(event) {
 	const summary = event.summary ? ` | ${compactText(event.summary, 120)}` : "";
 	return `- ${formatTimestamp(event.createdAt)} | ${event.eventType}${summary}`;
 }
-function formatWatchDetails(watch, events = []) {
+function formatWatchDetails(watch, events = [], now = Date.now()) {
 	const lines = [
 		`Watch ${watch.id}`,
 		`- status: ${watch.status}`,
@@ -868,8 +872,8 @@ function formatWatchDetails(watch, events = []) {
 		`- source: ${formatWatchSource(watch.kind, watch.source)}`,
 		`- condition: ${formatWatchCondition(watch.condition)}`,
 		`- interval: ${watch.intervalSeconds}s`,
-		`- next check: ${formatRelativeTime(watch.nextCheckAt)}`,
-		`- expires: ${formatRelativeTime(watch.expiresAt)}`,
+		`- next check: ${formatRelativeTime(watch.nextCheckAt, now)}`,
+		`- expires: ${formatRelativeTime(watch.expiresAt, now)}`,
 		`- created: ${formatTimestamp(watch.createdAt)}`,
 		`- updated: ${formatTimestamp(watch.updatedAt)}`,
 		`- last check: ${formatTimestamp(watch.lastCheckedAt)}`,
@@ -905,6 +909,9 @@ function usage() {
 		"/watches cancel <id>"
 	].join("\n");
 }
+function commandNow(deps) {
+	return deps.now?.() ?? Date.now();
+}
 function createWatchCommand(deps) {
 	const manager = createWatchManagementService(deps);
 	return {
@@ -919,7 +926,7 @@ function createWatchCommand(deps) {
 			if (parsed.action === "show") {
 				const watch = manager.showWatch(managementContext, parsed.id);
 				if (!watch) return { text: `No watch found for ${parsed.id}.` };
-				return { text: formatWatchDetails(watch, manager.showWatchEvents(managementContext, parsed.id)) };
+				return { text: formatWatchDetails(watch, manager.showWatchEvents(managementContext, parsed.id), commandNow(deps)) };
 			}
 			if (parsed.action === "cancel") return { text: formatCancelResult(manager.cancelWatch(managementContext, parsed.id), parsed.id) };
 			let watch;
@@ -929,7 +936,7 @@ function createWatchCommand(deps) {
 				return { text: formatManagementError(error) };
 			}
 			const baselineNote = parsed.condition.type === "changed" || parsed.condition.type === "github_pr_state_changed" ? "\n- baseline: first check captures the initial snapshot" : "";
-			return { text: `Watch ${watch.id} created.\n- ${watch.title}\n- interval: ${watch.intervalSeconds}s\n- next check: ${formatTimestamp(watch.nextCheckAt)}\n- expires: ${formatTimestamp(watch.expiresAt)}` + baselineNote };
+			return { text: `Watch ${watch.id} created.\n- ${watch.title}\n- interval: ${watch.intervalSeconds}s\n- next check: ${formatRelativeTime(watch.nextCheckAt, commandNow(deps))}\n- expires: ${formatRelativeTime(watch.expiresAt, commandNow(deps))}` + baselineNote };
 		}
 	};
 }
@@ -947,7 +954,7 @@ function createWatchesCommand(deps) {
 			if (parsed.action === "show") {
 				const watch = manager.showWatch(managementContext, parsed.id);
 				if (!watch) return { text: `No watch found for ${parsed.id}.` };
-				return { text: formatWatchDetails(watch, manager.showWatchEvents(managementContext, parsed.id)) };
+				return { text: formatWatchDetails(watch, manager.showWatchEvents(managementContext, parsed.id), commandNow(deps)) };
 			}
 			if (parsed.action === "cancel") return { text: formatCancelResult(manager.cancelWatch(managementContext, parsed.id), parsed.id) };
 			const watches = manager.listWatches(managementContext, {
@@ -955,7 +962,7 @@ function createWatchesCommand(deps) {
 				limit: 50
 			});
 			if (watches.length === 0) return { text: parsed.includeAll ? "No watches found." : "No active watches." };
-			return { text: [parsed.includeAll ? "Watches:" : "Active watches:", ...watches.map(formatWatchLine)].join("\n") };
+			return { text: formatWatchList(parsed.includeAll ? "Watches" : "Active watches", watches, commandNow(deps)) };
 		}
 	};
 }
@@ -963,7 +970,7 @@ function createWatchesCommands(deps) {
 	return [createWatchCommand(deps), createWatchesCommand(deps)];
 }
 //#endregion
-//#region ../openclaw-watches/src/config.ts
+//#region src/config.ts
 const DEFAULT_WATCHES_CONFIG = {
 	defaultIntervalSeconds: 900,
 	defaultExpiryMs: 1440 * 60 * 1e3,
@@ -1000,7 +1007,7 @@ function resolveWatchesConfig(input) {
 	};
 }
 //#endregion
-//#region ../openclaw-watches/src/evaluate.ts
+//#region src/evaluate.ts
 function hashWatchResult(value) {
 	return createHash("sha256").update(value).digest("hex");
 }
@@ -1065,13 +1072,14 @@ function evaluateTextCondition(params) {
 	};
 }
 //#endregion
-//#region ../openclaw-watches/src/check-github.ts
+//#region src/check-github.ts
 const GITHUB_HEADERS = {
 	accept: "application/vnd.github+json",
 	"user-agent": "OpenClaw Watches/1",
 	"x-github-api-version": "2022-11-28"
 };
 var GitHubWatchFetchError = class extends Error {
+	status;
 	constructor(message, status) {
 		super(message);
 		this.status = status;
@@ -1537,7 +1545,7 @@ async function checkGitHubPrWatch(params) {
 	throw new Error(`Unsupported GitHub PR watch condition: ${params.watch.condition.type}`);
 }
 //#endregion
-//#region ../openclaw-watches/src/check-model.ts
+//#region src/check-model.ts
 function normalize(value) {
 	return value?.trim().toLowerCase() ?? "";
 }
@@ -1593,7 +1601,7 @@ async function checkModelAvailability(params) {
 	};
 }
 //#endregion
-//#region ../openclaw-watches/src/check-url.ts
+//#region src/check-url.ts
 const TEXTUAL_CONTENT_TYPES = [
 	"text/",
 	"application/json",
@@ -1605,6 +1613,8 @@ const TEXTUAL_CONTENT_TYPES = [
 	"application/javascript"
 ];
 var UrlWatchFetchError = class extends Error {
+	status;
+	finalUrl;
 	constructor(message, status, finalUrl, options) {
 		super(message, options);
 		this.status = status;
@@ -1862,7 +1872,7 @@ async function checkUrlWatch(params) {
 	};
 }
 //#endregion
-//#region ../openclaw-watches/src/scheduler.ts
+//#region src/scheduler.ts
 function formatError$1(error) {
 	const message = error instanceof Error ? error.message : String(error);
 	return message.length <= 500 ? message : `${message.slice(0, 499)}…`;
@@ -1904,11 +1914,14 @@ async function defaultEvaluator(watch, context, config) {
 	throw new Error(`Unsupported watch kind: ${watch.kind ?? "unknown"}`);
 }
 var WatchesScheduler = class {
+	options;
+	timer = null;
+	running = false;
+	stopped = true;
+	now;
+	claimedBy;
 	constructor(options) {
 		this.options = options;
-		this.timer = null;
-		this.running = false;
-		this.stopped = true;
 		this.now = options.now ?? Date.now;
 		this.claimedBy = options.claimedBy ?? `watches:${process.pid}`;
 	}
@@ -2042,7 +2055,7 @@ var WatchesScheduler = class {
 	}
 };
 //#endregion
-//#region ../openclaw-watches/src/store.sqlite.ts
+//#region src/store.sqlite.ts
 const require = createRequire(import.meta.url);
 const WATCHES_DIR_MODE = 448;
 const WATCHES_FILE_MODE = 384;
@@ -2242,6 +2255,8 @@ function resolveWatchesSqlitePath(stateDir) {
 	return path.join(stateDir, "watches", "watches.sqlite");
 }
 var WatchesStore = class {
+	dbPath;
+	db;
 	constructor(dbPath) {
 		this.dbPath = dbPath;
 		this.db = openDatabase(dbPath);
@@ -2507,7 +2522,7 @@ var WatchesStore = class {
 	}
 };
 //#endregion
-//#region ../openclaw-watches/src/tool.ts
+//#region src/tool.ts
 const WatchManagementToolSchema = Type.Object({
 	action: Type.String({
 		enum: [
@@ -2599,6 +2614,15 @@ function serializeWatch(watch) {
 		triggeredAt: watch.triggeredAt,
 		expiredAt: watch.expiredAt,
 		cancelledAt: watch.cancelledAt
+	};
+}
+function serializeEvent(event) {
+	return {
+		id: event.id,
+		watchId: event.watchId,
+		eventType: event.eventType,
+		summary: event.summary,
+		createdAt: event.createdAt
 	};
 }
 function formatError(error) {
@@ -2744,7 +2768,8 @@ function createWatchesManagementTool(params) {
 						return jsonResult(watch ? {
 							ok: true,
 							action,
-							watch: serializeWatch(watch)
+							watch: serializeWatch(watch),
+							events: params.manager.showWatchEvents(context, watchId).map(serializeEvent)
 						} : {
 							ok: false,
 							action,
@@ -2778,7 +2803,7 @@ function createWatchesManagementTool(params) {
 	};
 }
 //#endregion
-//#region ../openclaw-watches/index.ts
+//#region index.ts
 var openclaw_watches_default = definePluginEntry({
 	id: "watches",
 	name: "Watches",

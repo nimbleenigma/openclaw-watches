@@ -90,6 +90,9 @@ function formatTimestamp(value?: number): string {
 
 function formatDuration(ms: number): string {
   const abs = Math.abs(ms);
+  if (abs < 1000) {
+    return "now";
+  }
   const units = [
     ["d", 86_400_000],
     ["h", 3_600_000],
@@ -108,9 +111,19 @@ function formatRelativeTime(value: number | undefined, now = Date.now()): string
   if (!value) {
     return "(none)";
   }
+  return `${formatTimestamp(value)} (${formatRelativeOnly(value, now)})`;
+}
+
+function formatRelativeOnly(value: number | undefined, now = Date.now()): string {
+  if (!value) {
+    return "(none)";
+  }
   const delta = value - now;
-  const suffix = delta >= 0 ? "from now" : "ago";
-  return `${formatTimestamp(value)} (${formatDuration(delta)} ${suffix})`;
+  const duration = formatDuration(delta);
+  if (duration === "now") {
+    return "now";
+  }
+  return delta >= 0 ? `in ${duration}` : `${duration} ago`;
 }
 
 function compactText(value: string, maxChars = 120): string {
@@ -192,23 +205,30 @@ function formatStatusPrefix(status: WatchStatus): string {
   return status;
 }
 
-function formatWatchLine(watch: WatchRecord): string {
-  const parts = [`- ${watch.id}`, formatStatusPrefix(watch.status), watch.title];
+function formatWatchListItem(watch: WatchRecord, now = Date.now()): string {
+  const lines = [`${watch.id}  ${formatStatusPrefix(watch.status)}`, `  ${watch.title}`];
   if (watch.status === "active") {
-    parts.push(`next: ${formatRelativeTime(watch.nextCheckAt)}`);
-    parts.push(`expires: ${formatRelativeTime(watch.expiresAt)}`);
+    lines.push(
+      `  Next: ${formatRelativeOnly(watch.nextCheckAt, now)} | Expires: ${formatRelativeOnly(
+        watch.expiresAt,
+        now,
+      )}`,
+    );
   }
-  parts.push(
-    `last: ${
-      watch.lastResultSummary
-        ? `${compactText(watch.lastResultSummary)} at ${formatTimestamp(watch.lastCheckedAt)}`
-        : "none"
-    }`,
-  );
+  const lastResult = watch.lastResultSummary
+    ? `${compactText(watch.lastResultSummary, 96)} (${formatRelativeOnly(watch.lastCheckedAt, now)})`
+    : "none";
+  lines.push(`  Last: ${lastResult}`);
   if (watch.lastError) {
-    parts.push(`error: ${compactText(watch.lastError)} (count: ${watch.errorCount})`);
+    lines.push(`  Error: ${compactText(watch.lastError, 96)} (count: ${watch.errorCount})`);
   }
-  return parts.join(" | ");
+  return lines.join("\n");
+}
+
+function formatWatchList(title: string, watches: WatchRecord[], now = Date.now()): string {
+  return [`${title}: ${watches.length}`, ...watches.map((watch) => formatWatchListItem(watch, now))].join(
+    "\n\n",
+  );
 }
 
 function formatTerminalTimestamp(watch: WatchRecord): string | undefined {
@@ -224,6 +244,7 @@ function formatTerminalTimestamp(watch: WatchRecord): string | undefined {
     case "active":
       return undefined;
   }
+  return undefined;
 }
 
 function formatWatchEvent(event: WatchEventRecord): string {
@@ -231,7 +252,11 @@ function formatWatchEvent(event: WatchEventRecord): string {
   return `- ${formatTimestamp(event.createdAt)} | ${event.eventType}${summary}`;
 }
 
-function formatWatchDetails(watch: WatchRecord, events: WatchEventRecord[] = []): string {
+function formatWatchDetails(
+  watch: WatchRecord,
+  events: WatchEventRecord[] = [],
+  now = Date.now(),
+): string {
   const lines = [
     `Watch ${watch.id}`,
     `- status: ${watch.status}`,
@@ -240,8 +265,8 @@ function formatWatchDetails(watch: WatchRecord, events: WatchEventRecord[] = [])
     `- source: ${formatWatchSource(watch.kind, watch.source)}`,
     `- condition: ${formatWatchCondition(watch.condition)}`,
     `- interval: ${watch.intervalSeconds}s`,
-    `- next check: ${formatRelativeTime(watch.nextCheckAt)}`,
-    `- expires: ${formatRelativeTime(watch.expiresAt)}`,
+    `- next check: ${formatRelativeTime(watch.nextCheckAt, now)}`,
+    `- expires: ${formatRelativeTime(watch.expiresAt, now)}`,
     `- created: ${formatTimestamp(watch.createdAt)}`,
     `- updated: ${formatTimestamp(watch.updatedAt)}`,
     `- last check: ${formatTimestamp(watch.lastCheckedAt)}`,
@@ -285,6 +310,10 @@ function usage(): string {
   ].join("\n");
 }
 
+function commandNow(deps: WatchManagementDeps): number {
+  return deps.now?.() ?? Date.now();
+}
+
 function createWatchCommand(deps: WatchesCommandDeps): OpenClawPluginCommandDefinition {
   const manager = createWatchManagementService(deps);
   return {
@@ -308,7 +337,11 @@ function createWatchCommand(deps: WatchesCommandDeps): OpenClawPluginCommandDefi
           return { text: `No watch found for ${parsed.id}.` };
         }
         return {
-          text: formatWatchDetails(watch, manager.showWatchEvents(managementContext, parsed.id)),
+          text: formatWatchDetails(
+            watch,
+            manager.showWatchEvents(managementContext, parsed.id),
+            commandNow(deps),
+          ),
         };
       }
 
@@ -333,8 +366,8 @@ function createWatchCommand(deps: WatchesCommandDeps): OpenClawPluginCommandDefi
           `Watch ${watch.id} created.\n` +
           `- ${watch.title}\n` +
           `- interval: ${watch.intervalSeconds}s\n` +
-          `- next check: ${formatTimestamp(watch.nextCheckAt)}\n` +
-          `- expires: ${formatTimestamp(watch.expiresAt)}` +
+          `- next check: ${formatRelativeTime(watch.nextCheckAt, commandNow(deps))}\n` +
+          `- expires: ${formatRelativeTime(watch.expiresAt, commandNow(deps))}` +
           baselineNote,
       };
     },
@@ -362,7 +395,11 @@ function createWatchesCommand(deps: WatchesCommandDeps): OpenClawPluginCommandDe
           return { text: `No watch found for ${parsed.id}.` };
         }
         return {
-          text: formatWatchDetails(watch, manager.showWatchEvents(managementContext, parsed.id)),
+          text: formatWatchDetails(
+            watch,
+            manager.showWatchEvents(managementContext, parsed.id),
+            commandNow(deps),
+          ),
         };
       }
       if (parsed.action === "cancel") {
@@ -377,8 +414,8 @@ function createWatchesCommand(deps: WatchesCommandDeps): OpenClawPluginCommandDe
       if (watches.length === 0) {
         return { text: parsed.includeAll ? "No watches found." : "No active watches." };
       }
-      const title = parsed.includeAll ? "Watches:" : "Active watches:";
-      return { text: [title, ...watches.map(formatWatchLine)].join("\n") };
+      const title = parsed.includeAll ? "Watches" : "Active watches";
+      return { text: formatWatchList(title, watches, commandNow(deps)) };
     },
   };
 }

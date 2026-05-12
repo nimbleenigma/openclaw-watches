@@ -3,12 +3,14 @@ import type { OpenClawPluginToolContext } from "../api.js";
 import { DEFAULT_WATCHES_CONFIG } from "./config.js";
 import { createWatchManagementService } from "./management.js";
 import { createWatchManagementContextForTool, createWatchesManagementTool } from "./tool.js";
-import type { CreateWatchInput, WatchRecord } from "./types.js";
+import type { CreateWatchInput, WatchEventRecord, WatchRecord } from "./types.js";
 
 function createMemoryStore() {
   const watches = new Map<string, WatchRecord>();
+  const events = new Map<string, WatchEventRecord[]>();
   return {
     watches,
+    events,
     createWatch(input: CreateWatchInput): WatchRecord {
       const watch: WatchRecord = {
         id: input.id,
@@ -33,6 +35,15 @@ function createMemoryStore() {
         updatedAt: input.createdAt,
       };
       watches.set(watch.id, watch);
+      events.set(watch.id, [
+        {
+          id: `e_${watch.id}`,
+          watchId: watch.id,
+          eventType: "created",
+          summary: watch.title,
+          createdAt: input.createdAt,
+        },
+      ]);
       return watch;
     },
     countActiveForOwner(ownerKey: string): number {
@@ -48,6 +59,9 @@ function createMemoryStore() {
     },
     getWatch(id: string): WatchRecord | undefined {
       return watches.get(id);
+    },
+    listEvents(watchId: string): WatchEventRecord[] {
+      return events.get(watchId) ?? [];
     },
     cancelWatch(params: {
       id: string;
@@ -66,6 +80,16 @@ function createMemoryStore() {
         watch.status = "cancelled";
         watch.cancelledAt = params.now;
         watch.updatedAt = params.now;
+        events.set(watch.id, [
+          ...(events.get(watch.id) ?? []),
+          {
+            id: `e_cancel_${watch.id}`,
+            watchId: watch.id,
+            eventType: "cancelled",
+            summary: "Watch cancelled.",
+            createdAt: params.now,
+          },
+        ]);
       }
       return watch;
     },
@@ -264,6 +288,7 @@ describe("watches_manage tool", () => {
     expect(details(aliceShow)).toMatchObject({
       ok: true,
       watch: { id: "w_1" },
+      events: [expect.objectContaining({ eventType: "created", watchId: "w_1" })],
     });
 
     const cancelled = await tool.execute("tool-6", { action: "cancel", watch_id: "w_1" });

@@ -99,7 +99,7 @@ function requestAuthHeader(call: unknown[]): string | undefined {
   const init = call[1] as RequestInit | undefined;
   const headers = init?.headers;
   return headers && !Array.isArray(headers) && !(headers instanceof Headers)
-    ? (headers as Record<string, string>).authorization
+    ? headers.authorization
     : undefined;
 }
 

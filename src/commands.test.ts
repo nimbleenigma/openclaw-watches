@@ -133,9 +133,11 @@ describe("watch commands", () => {
 
     const listed = await watchesCommand.handler(createContext("") as never);
     expect(listed.text).toContain("Active watches:");
+    expect(listed.text).toContain("Active watches: 1");
     expect(listed.text).toContain("URL contains: hello");
-    expect(listed.text).toContain("next:");
-    expect(listed.text).toContain("last:");
+    expect(listed.text).toContain("Next: now");
+    expect(listed.text).toContain("Expires: in 1d");
+    expect(listed.text).toContain("Last:");
   });
 
   it("creates watches with per-watch schedule suffixes", async () => {
@@ -154,6 +156,8 @@ describe("watch commands", () => {
     expect(watch?.intervalSeconds).toBe(300);
     expect(watch?.expiresAt).toBe(7_201_000);
     expect(created.text).toContain("interval: 300s");
+    expect(created.text).toContain("(now)");
+    expect(created.text).toContain("(in 2h)");
   });
 
   it("shows watches owned by the caller", async () => {
@@ -218,8 +222,8 @@ describe("watch commands", () => {
     watch.lastError = "HTTP 403 fetching https://example.com/";
 
     const listed = await watchesCommand.handler(createContext("all") as never);
-    expect(listed.text).toContain("last: Text not found");
-    expect(listed.text).toContain("error: HTTP 403");
+    expect(listed.text).toContain("Last: Text not found");
+    expect(listed.text).toContain("Error: HTTP 403");
   });
 
   it("cancels only watches owned by the caller and reports final status", async () => {
