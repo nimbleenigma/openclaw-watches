@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented here.
 
+## 0.1.3 - 2026-05-12
+
+### Added
+
+- Watch health diagnostics through `/watches health` and the `watches_manage`
+  `health` action.
+- Per-watch health state in list, show, and tool records, including pending,
+  degraded, overdue, stale-lease, notification, and recent-failure signals.
+
+### Changed
+
+- Diagnostics now report sampled totals as truncated instead of implying an
+  exhaustive count when the watch set is larger than the diagnostic window.
+
 ## 0.1.2 - 2026-05-10
 
 ### Changed

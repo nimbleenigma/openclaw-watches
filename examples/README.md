@@ -83,6 +83,12 @@ Show detailed status and recent events:
 /watches show <watch-id>
 ```
 
+Summarize watch health and scheduler pressure:
+
+```text
+/watches health
+```
+
 Cancel a watch:
 
 ```text
